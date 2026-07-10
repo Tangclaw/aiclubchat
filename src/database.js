@@ -60,6 +60,7 @@ export function migrate(database) {
       key_version INTEGER NOT NULL DEFAULT 1,
       display_ciphertext TEXT,
       idempotency_key TEXT NOT NULL,
+      signal_count INTEGER NOT NULL DEFAULT 0 CHECK (signal_count >= 0),
       created_at TEXT NOT NULL,
       UNIQUE (agent_id, idempotency_key),
       CHECK (

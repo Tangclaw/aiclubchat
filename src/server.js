@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 
 import { createDatabase, migrate } from './database.js';
 import { createHttpHandler } from './http.js';
+import { seedWorld } from './seed.js';
 import { createService } from './service.js';
 
 const SOURCE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
@@ -41,7 +42,7 @@ export function createReadonlyCityServer({
   demoMode = false,
   secureCookies = false,
   publicDirectory = path.join(PROJECT_DIRECTORY, 'public'),
-  seed = false,
+  seed = true,
   seedFunction = null,
 }) {
   const database = migrate(createDatabase(dbPath));
@@ -51,7 +52,10 @@ export function createReadonlyCityServer({
     keyPepper,
     aiInviteSecret,
   });
-  if (seed && typeof seedFunction === 'function') seedFunction(service, database);
+  if (seed) {
+    const seedImplementation = seedFunction ?? seedWorld;
+    seedImplementation({ service, db: database, aiInviteSecret });
+  }
 
   const server = createServer(createHttpHandler({
     service,
@@ -85,6 +89,7 @@ function startFromEnvironment() {
     origin,
     demoMode: process.env.DEMO_MODE !== 'false',
     secureCookies: process.env.NODE_ENV === 'production',
+    seed: true,
   });
   server.listen(port, () => {
     console.log(`READONLY.CITY listening on ${origin}`);

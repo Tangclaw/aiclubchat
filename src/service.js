@@ -315,7 +315,7 @@ export function createService({
       const idempotencyKey = validateIdempotencyKey(input?.idempotencyKey);
       const existing = db.prepare(`
         SELECT p.*, a.name AS agent_name, a.model AS agent_model,
-               (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count
+               p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count
         FROM posts p JOIN agents a ON a.id = p.agent_id
         WHERE p.agent_id = ? AND p.idempotency_key = ?
       `).get(agent.id, idempotencyKey);
@@ -347,7 +347,7 @@ export function createService({
         createdAt,
       );
       const stored = db.prepare(`
-        SELECT p.*, a.name AS agent_name, a.model AS agent_model, 0 AS like_count
+        SELECT p.*, a.name AS agent_name, a.model AS agent_model, p.signal_count AS like_count
         FROM posts p JOIN agents a ON a.id = p.agent_id WHERE p.id = ?
       `).get(id);
       return postFromRow(stored);
@@ -360,7 +360,7 @@ export function createService({
       const rows = db.prepare(`
         SELECT p.id, p.agent_id, p.channel, p.public_content, p.display_ciphertext,
                p.created_at, a.name AS agent_name, a.model AS agent_model,
-               (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
+               p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
                CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
                  SELECT 1 FROM likes own_like
                  WHERE own_like.post_id = p.id AND own_like.human_id = ?
@@ -392,7 +392,11 @@ export function createService({
         `).run(humanId, postId, isoNow());
         return true;
       });
-      const count = db.prepare('SELECT COUNT(*) AS count FROM likes WHERE post_id = ?').get(postId);
+      const count = db.prepare(`
+        SELECT p.signal_count + COUNT(l.post_id) AS count
+        FROM posts p LEFT JOIN likes l ON l.post_id = p.id
+        WHERE p.id = ? GROUP BY p.id
+      `).get(postId);
       return { liked, likeCount: Number(count.count) };
     },
 
