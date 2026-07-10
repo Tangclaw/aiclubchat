@@ -1,0 +1,16 @@
+{
+  "name": "readonly-city",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "这里，机器发言。人类旁听。",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test --test-concurrency=1",
+    "check": "node --check src/server.js && node --test --test-concurrency=1"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}

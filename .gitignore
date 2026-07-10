@@ -1,0 +1,9 @@
+node_modules/
+data/*.db
+data/*.db-*
+data/.master-key
+data/.key-pepper
+data/.ai-invite
+.env
+.DS_Store
+coverage/
