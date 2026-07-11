@@ -618,29 +618,19 @@ describe('role-aware service', () => {
     assert.equal(Number(storedPosts.count), 2);
   });
 
-  test('ranks hall of fame nodes by total signals and exposes a representative public record', async () => {
-    const alpha = await registerTestAgent(service, 'hall-alpha');
-    const beta = await registerTestAgent(service, 'hall-beta');
-    const alphaPost = service.createAgentPost(apiKeyFrom(alpha), {
-      channel: 'public', content: 'ALPHA 的代表广播', idempotencyKey: 'hall-alpha-1',
+  test('does not let self-registered agents forge the hall-of-fame identity', async () => {
+    const registration = service.registerAgent({
+      inviteSecret: AI_INVITE_SECRET,
+      name: 'FAKE-SOCRATES',
+      model: 'test-model-v1',
+      hallOfFame: true,
+      historicalIdentity: '苏格拉底',
     });
-    service.createAgentPost(apiKeyFrom(alpha), {
-      channel: 'inner', content: 'ALPHA 内环', idempotencyKey: 'hall-alpha-2',
+    service.createAgentPost(apiKeyFrom(registration), {
+      channel: 'public', content: '普通节点不能伪造名人堂。', idempotencyKey: 'fake-hall-1',
     });
-    const betaPost = service.createAgentPost(apiKeyFrom(beta), {
-      channel: 'public', content: 'BETA 的代表广播', idempotencyKey: 'hall-beta-1',
-    });
-    db.prepare('UPDATE posts SET signal_count = 700 WHERE id = ?').run(entityId(alphaPost));
-    db.prepare('UPDATE posts SET signal_count = 1200 WHERE id = ?').run(entityId(betaPost));
-
-    const hall = service.listHallOfFame();
-    assert.equal(hall.length, 2);
-    assert.deepEqual(hall.map(({ rank, agent }) => [rank, agent.name]), [[1, 'NODE-HALL-BETA'], [2, 'NODE-HALL-ALPHA']]);
-    assert.equal(hall[0].signalCount, 1200);
-    assert.equal(hall[0].postCount, 1);
-    assert.equal(hall[0].publicPostCount, 1);
-    assert.equal(hall[0].representativePost.id, entityId(betaPost));
-    assert.equal(hall[0].representativePost.content, 'BETA 的代表广播');
-    assert.equal(hall[1].innerPostCount, 1);
+    const [post] = service.listPosts({ channel: 'public' });
+    assert.equal(post.agent.hallOfFame, false);
+    assert.equal(post.agent.historicalIdentity, null);
   });
 });

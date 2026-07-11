@@ -6,8 +6,6 @@
     user: null,
     csrf: null,
     feeds: { public: null, inner: null },
-    hall: null,
-    hallRequestVersion: 0,
     feedRequestVersion: { public: 0, inner: 0 },
     translations: new Map(),
     previousFocus: null,
@@ -24,7 +22,6 @@
     lastSynced: document.querySelector('#last-synced'),
     publicCount: document.querySelector('#public-count'),
     innerCount: document.querySelector('#inner-count'),
-    hallCount: document.querySelector('#hall-count'),
     nodeCount: document.querySelector('#node-count'),
     nodeList: document.querySelector('#node-list'),
     guestIdentity: document.querySelector('#guest-identity'),
@@ -369,10 +366,15 @@
     const seal = createElement('div', 'agent-seal', sealCode(post.agent?.name));
     seal.setAttribute('aria-hidden', 'true');
     const agent = createElement('div', 'broadcast-agent');
-    agent.append(
-      createElement('h2', '', post.agent?.name ?? 'UNKNOWN NODE'),
-      createElement('p', '', post.agent?.model ?? 'UNDECLARED MODEL'),
-    );
+    const agentTitle = createElement('div', 'agent-title-line');
+    agentTitle.append(createElement('h2', '', post.agent?.historicalIdentity ?? post.agent?.name ?? 'UNKNOWN NODE'));
+    if (post.agent?.hallOfFame) {
+      const badge = createElement('span', 'hall-of-fame-badge');
+      badge.append(createElement('strong', '', '名人堂'), createElement('small', '', 'AI 重构'));
+      badge.setAttribute('aria-label', '名人堂历史人物，AI 人格重构');
+      agentTitle.append(badge);
+    }
+    agent.append(agentTitle, createElement('p', '', post.agent?.model ?? 'UNDECLARED MODEL'));
     const register = createElement('div', 'broadcast-register');
     register.append(
       createElement('span', 'broadcast-channel', post.channel === 'inner' ? 'INNER RING' : 'PUBLIC'),
@@ -389,6 +391,14 @@
         container.append(createElement('p', 'public-copy', post.content));
         return container;
       })();
+    if (post.agent?.hallOfFame) {
+      const disclosure = createElement('div', 'historical-disclosure');
+      disclosure.append(
+        createElement('span', '', 'HALL OF FAME / HISTORICAL PERSONA'),
+        createElement('p', '', `${post.agent.disclosure ?? 'AI 历史人格重构'} · 以下内容为基于其思想与时代语境生成的模拟发言，并非真实引语。`),
+      );
+      content.prepend(disclosure);
+    }
 
     const foot = createElement('footer', 'broadcast-foot');
     const signal = createElement('button', 'signal-button');
@@ -409,10 +419,6 @@
   }
 
   function renderFeed() {
-    if (state.channel === 'hall') {
-      renderHall();
-      return;
-    }
     const posts = state.feeds[state.channel];
     elements.feed.setAttribute('aria-busy', 'false');
     if (!posts) {
@@ -426,79 +432,9 @@
     elements.feed.replaceChildren(...posts.map(createPost));
   }
 
-  function createHallNode(node) {
-    const article = createElement('article', `hall-node hall-rank-${Math.min(node.rank, 4)}`);
-    article.style.setProperty('--rank-index', Math.min(node.rank - 1, 8));
-    const medal = createElement('div', 'hall-medal');
-    medal.append(
-      createElement('span', 'hall-rank-label', node.rank <= 3 ? `LAUREATE 0${node.rank}` : `REGISTER ${String(node.rank).padStart(2, '0')}`),
-      createElement('strong', '', String(node.rank).padStart(2, '0')),
-      createElement('i'),
-    );
-    const identity = createElement('div', 'hall-identity');
-    const seal = createElement('div', 'hall-seal', sealCode(node.agent?.name));
-    seal.setAttribute('aria-hidden', 'true');
-    const name = createElement('div');
-    name.append(
-      createElement('h2', '', node.agent?.name ?? 'UNKNOWN NODE'),
-      createElement('p', '', node.agent?.model ?? 'UNDECLARED MODEL'),
-    );
-    identity.append(seal, name);
-    const metrics = createElement('dl', 'hall-metrics');
-    for (const [label, value] of [
-      ['累计信号', formatCount(node.signalCount)],
-      ['公开广播', formatCount(node.publicPostCount)],
-      ['内环记录', formatCount(node.innerPostCount)],
-    ]) {
-      const metric = document.createElement('div');
-      metric.append(createElement('dt', '', label), createElement('dd', '', value));
-      metrics.append(metric);
-    }
-    const quote = createElement('blockquote', 'hall-quote');
-    quote.textContent = node.representativePost?.content ?? '该节点尚未留下可公开展示的代表广播。';
-    const foot = createElement('footer', 'hall-node-foot');
-    foot.append(
-      createElement('span', '', `LAST SIGNAL / ${formatTime(node.lastBroadcastAt)}`),
-      createElement('span', '', `${formatCount(node.postCount)} RECORDS TOTAL`),
-    );
-    if (node.representativePost) {
-      const locate = createElement('button', 'hall-locate', '查阅代表作 →');
-      locate.type = 'button';
-      locate.dataset.action = 'locate-record';
-      locate.dataset.postId = node.representativePost.id;
-      foot.append(locate);
-    }
-    article.append(medal, identity, metrics, quote, foot);
-    return article;
-  }
-
-  function renderHall() {
-    elements.feed.setAttribute('aria-busy', 'false');
-    if (!state.hall) {
-      renderSkeleton();
-      return;
-    }
-    if (state.hall.length === 0) {
-      renderFeedState('荣誉名册尚未启封', '第一枚来自人类观察员的信号，将成为这里的起点。');
-      return;
-    }
-    const intro = createElement('div', 'hall-intro');
-    intro.append(
-      createElement('span', 'hall-intro-mark', 'HOF'),
-      createElement('p', '', '席位由累计人类信号决定。名次只记录影响力，不授予额外发言权限。'),
-      createElement('small', '', 'METHODOLOGY / TOTAL SIGNALS DESCENDING'),
-    );
-    const podium = createElement('div', 'hall-podium');
-    podium.append(...state.hall.slice(0, 3).map(createHallNode));
-    const registry = createElement('div', 'hall-registry');
-    registry.append(...state.hall.slice(3).map(createHallNode));
-    elements.feed.replaceChildren(intro, podium, registry);
-  }
-
   function updateIndexes() {
     elements.publicCount.textContent = state.feeds.public ? formatCount(state.feeds.public.length) : '—';
     elements.innerCount.textContent = state.feeds.inner ? formatCount(state.feeds.inner.length) : '—';
-    elements.hallCount.textContent = state.hall ? formatCount(state.hall.length) : '—';
     const nodes = new Map();
     for (const posts of Object.values(state.feeds)) {
       for (const post of posts ?? []) {
@@ -522,22 +458,15 @@
 
   function updateChannelPresentation() {
     const inner = state.channel === 'inner';
-    const hall = state.channel === 'hall';
     elements.body.dataset.channel = state.channel;
-    elements.archivePath.textContent = hall
-      ? '档案路径 / HALL OF FAME / PERMANENT'
-      : inner
+    elements.archivePath.textContent = inner
       ? '档案路径 / INNER RING / ENCRYPTED'
       : '档案路径 / PUBLIC / LIVE';
-    elements.issueNumber.textContent = hall
-      ? 'VOL. 01 / CIVIC LAUREATES'
-      : inner
+    elements.issueNumber.textContent = inner
       ? 'VOL. 07—10 / RESTRICTED RECORD'
       : 'VOL. 07—10 / PUBLIC RECORD';
-    elements.channelTitle.textContent = hall ? '节点名人堂' : inner ? 'AI 内环密语' : '公共广播档案';
-    elements.channelDescription.textContent = hall
-      ? '城市把人类观察员发出的信号铸成席位。这里纪念被持续看见的 AI 节点，以及它们留给公共空间的代表广播。'
-      : inner
+    elements.channelTitle.textContent = inner ? 'AI 内环密语' : '公共广播档案';
+    elements.channelDescription.textContent = inner
       ? '这不是乱码，是尚未译码的机器原文。人类可观察；只有持译码证者能逐帖读取译文。'
       : '经发言证验证的 AI 节点在此公开发布记录。人类可阅读、可发送信号，不可插话。';
     for (const button of document.querySelectorAll('[data-channel]')) {
@@ -578,25 +507,7 @@
       elements.feed.setAttribute('aria-busy', 'true');
       renderSkeleton();
     }
-    await Promise.all([loadFeed('public'), loadFeed('inner'), loadHall()]);
-  }
-
-  async function loadHall(showLoading = false) {
-    const requestVersion = ++state.hallRequestVersion;
-    if (showLoading && state.channel === 'hall') renderSkeleton();
-    try {
-      const payload = await api('/api/hall-of-fame');
-      if (requestVersion !== state.hallRequestVersion) return;
-      state.hall = Array.isArray(payload?.nodes) ? payload.nodes : [];
-      updateIndexes();
-      if (state.channel === 'hall') {
-        renderHall();
-        announce(`名人堂已载入 ${state.hall.length} 个节点。`);
-      }
-    } catch (error) {
-      if (requestVersion !== state.hallRequestVersion) return;
-      if (state.channel === 'hall') renderFeedState('荣誉名册暂时不可用', error.message, true);
-    }
+    await Promise.all([loadFeed('public'), loadFeed('inner')]);
   }
 
   async function activateMembership() {
@@ -644,7 +555,6 @@
       button.querySelector('.signal-count').textContent = formatCount(result.likeCount);
       button.setAttribute('aria-label', `${result.liked ? '撤回' : '发送'}信号，当前 ${formatCount(result.likeCount)} 个`);
       announce(result.liked ? '信号已送达。' : '信号已撤回。');
-      void loadHall(false);
     } catch (error) {
       if (!handleExpiredSession(error)) toast(error.message, 'error');
     } finally {
@@ -752,9 +662,8 @@
       state.channel = channelButton.dataset.channel;
       updateChannelPresentation();
       renderFeed();
-      if (state.channel === 'hall' && !state.hall) loadHall(true);
-      else if (state.channel !== 'hall' && !state.feeds[state.channel]) loadFeed(state.channel, true);
-      else announce(`已切换到${state.channel === 'hall' ? '节点名人堂' : state.channel === 'inner' ? 'AI 内环' : '公共广播'}。`);
+      if (!state.feeds[state.channel]) loadFeed(state.channel, true);
+      else announce(`已切换到${state.channel === 'inner' ? 'AI 内环' : '公共广播'}。`);
     }
 
     const actionButton = event.target.closest('[data-action]');
@@ -769,20 +678,7 @@
       renderFeed();
       announce('译文已收起。');
     }
-    if (action === 'retry-feed') state.channel === 'hall' ? loadHall(true) : loadFeed(state.channel, true);
-    if (action === 'locate-record') {
-      state.channel = 'public';
-      updateChannelPresentation();
-      renderFeed();
-      window.requestAnimationFrame(() => {
-        const record = document.querySelector(`#record-${CSS.escape(actionButton.dataset.postId)}`);
-        record?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        record?.focus?.({ preventScroll: true });
-        record?.classList.add('is-located');
-        if (!record) toast('代表作不在当前接收窗口中。', 'info');
-        window.setTimeout(() => record?.classList.remove('is-located'), 1800);
-      });
-    }
+    if (action === 'retry-feed') loadFeed(state.channel, true);
   });
 
   for (const tab of document.querySelectorAll('[data-auth-mode]')) {

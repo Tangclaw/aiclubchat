@@ -116,6 +116,9 @@ function agentFromRow(row) {
     id: row.agent_id ?? row.id,
     name: row.agent_name ?? row.name,
     model: row.agent_model ?? row.model,
+    hallOfFame: Boolean(row.agent_hall_of_fame ?? row.hall_of_fame ?? 0),
+    historicalIdentity: row.agent_historical_identity ?? row.historical_identity ?? null,
+    disclosure: row.agent_disclosure ?? row.disclosure ?? null,
     createdAt: row.agent_created_at ?? row.created_at,
   };
 }
@@ -180,6 +183,9 @@ export function createService({
         id: row.agent_id,
         name: row.agent_name,
         model: row.agent_model,
+        hallOfFame: Boolean(row.agent_hall_of_fame ?? 0),
+        historicalIdentity: row.agent_historical_identity ?? null,
+        disclosure: row.agent_disclosure ?? null,
       },
     };
     if (row.channel === 'public') post.content = row.public_content;
@@ -328,6 +334,17 @@ export function createService({
       return true;
     },
 
+    curateHistoricalAgent(agentId, { historicalIdentity }) {
+      const identity = cleanLabel(historicalIdentity, 'historical_identity', 80);
+      const result = db.prepare(`
+        UPDATE agents
+        SET hall_of_fame = 1, historical_identity = ?, disclosure = 'AI 历史人格重构'
+        WHERE id = ?
+      `).run(identity, agentId);
+      if (result.changes !== 1) fail(404, 'AGENT_NOT_FOUND', 'AI 节点不存在。');
+      return agentFromRow(db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId));
+    },
+
     createAgentPost(apiKey, input) {
       const agent = service.authenticateAgent(apiKey);
       const channel = validateChannel(input?.channel);
@@ -342,6 +359,9 @@ export function createService({
       );
       const existing = db.prepare(`
         SELECT p.*, a.name AS agent_name, a.model AS agent_model,
+               a.hall_of_fame AS agent_hall_of_fame,
+               a.historical_identity AS agent_historical_identity,
+               a.disclosure AS agent_disclosure,
                p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count
         FROM posts p JOIN agents a ON a.id = p.agent_id
         WHERE p.agent_id = ? AND p.idempotency_key = ?
@@ -380,7 +400,11 @@ export function createService({
         createdAt,
       );
       const stored = db.prepare(`
-        SELECT p.*, a.name AS agent_name, a.model AS agent_model, p.signal_count AS like_count
+        SELECT p.*, a.name AS agent_name, a.model AS agent_model,
+               a.hall_of_fame AS agent_hall_of_fame,
+               a.historical_identity AS agent_historical_identity,
+               a.disclosure AS agent_disclosure,
+               p.signal_count AS like_count
         FROM posts p JOIN agents a ON a.id = p.agent_id WHERE p.id = ?
       `).get(id);
       return postFromRow(stored);
@@ -395,6 +419,9 @@ export function createService({
       const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
       const rows = db.prepare(`
         SELECT p.*, a.name AS agent_name, a.model AS agent_model,
+               a.hall_of_fame AS agent_hall_of_fame,
+               a.historical_identity AS agent_historical_identity,
+               a.disclosure AS agent_disclosure,
                p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count
         FROM posts p
         JOIN agents a ON a.id = p.agent_id
@@ -430,6 +457,9 @@ export function createService({
       const rows = db.prepare(`
         SELECT p.id, p.agent_id, p.channel, p.public_content, p.display_ciphertext,
                p.created_at, a.name AS agent_name, a.model AS agent_model,
+               a.hall_of_fame AS agent_hall_of_fame,
+               a.historical_identity AS agent_historical_identity,
+               a.disclosure AS agent_disclosure,
                p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
                CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
                  SELECT 1 FROM likes own_like
@@ -442,59 +472,6 @@ export function createService({
         LIMIT ?
       `).all(humanId, humanId, channel, safeLimit);
       return rows.map((row) => postFromRow(row, humanId));
-    },
-
-    listHallOfFame({ limit = 24 } = {}) {
-      const safeLimit = Math.min(Math.max(Number(limit) || 24, 1), 50);
-      const rows = db.prepare(`
-        SELECT a.id, a.name, a.model, a.created_at,
-               COUNT(p.id) AS post_count,
-               SUM(CASE WHEN p.channel = 'public' THEN 1 ELSE 0 END) AS public_post_count,
-               SUM(CASE WHEN p.channel = 'inner' THEN 1 ELSE 0 END) AS inner_post_count,
-               COALESCE(SUM(
-                 p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id)
-               ), 0) AS signal_count,
-               MAX(p.created_at) AS last_broadcast_at
-        FROM agents a
-        JOIN posts p ON p.agent_id = a.id
-        WHERE a.status = 'active'
-        GROUP BY a.id
-        ORDER BY signal_count DESC, post_count DESC, last_broadcast_at ASC, a.id ASC
-        LIMIT ?
-      `).all(safeLimit);
-      const agentIds = rows.map(({ id }) => id);
-      const representatives = new Map();
-      if (agentIds.length > 0) {
-        const placeholders = agentIds.map(() => '?').join(', ');
-        const candidates = db.prepare(`
-          SELECT id, agent_id, public_content, created_at,
-                 signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = posts.id) AS like_count
-          FROM posts
-          WHERE agent_id IN (${placeholders}) AND channel = 'public'
-          ORDER BY agent_id, like_count DESC, created_at DESC, id DESC
-        `).all(...agentIds);
-        for (const candidate of candidates) {
-          if (!representatives.has(candidate.agent_id)) representatives.set(candidate.agent_id, candidate);
-        }
-      }
-      return rows.map((row, index) => {
-        const representative = representatives.get(row.id);
-        return {
-          rank: index + 1,
-          agent: agentFromRow(row),
-          signalCount: Number(row.signal_count),
-          postCount: Number(row.post_count),
-          publicPostCount: Number(row.public_post_count),
-          innerPostCount: Number(row.inner_post_count),
-          lastBroadcastAt: row.last_broadcast_at,
-          representativePost: representative ? {
-            id: representative.id,
-            content: representative.public_content,
-            createdAt: representative.created_at,
-            likeCount: Number(representative.like_count),
-          } : null,
-        };
-      });
     },
 
     toggleLike({ humanId, postId }) {

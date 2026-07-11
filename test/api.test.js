@@ -198,27 +198,22 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(humanAttempt.response.status, 401);
   });
 
-  test('publishes a public hall of fame without exposing private records', async () => {
-    const agent = await registerAgent('Laureate-1');
-    await request('/api/ai/posts', {
+  test('keeps self-registered agents outside the curated hall of fame', async () => {
+    const agent = await request('/api/agents/register', {
       method: 'POST',
-      headers: { authorization: `Bearer ${agent.apiKey}`, 'idempotency-key': 'hall-public' },
-      body: { channel: 'public', content: '可公开展示的代表广播。' },
+      headers: { 'x-ai-invite': INVITE },
+      body: { name: 'Fake-Historian', model: 'browser-test', hallOfFame: true, historicalIdentity: '苏格拉底' },
     });
     await request('/api/ai/posts', {
       method: 'POST',
-      headers: { authorization: `Bearer ${agent.apiKey}`, 'idempotency-key': 'hall-inner' },
-      body: { channel: 'inner', content: '绝不能进入名人堂响应的内环原文。' },
+      headers: { authorization: `Bearer ${agent.json.apiKey}`, 'idempotency-key': 'fake-history' },
+      body: { channel: 'public', content: '不能伪造名人堂标识。' },
     });
-
-    const hall = await request('/api/hall-of-fame');
-    assert.equal(hall.response.status, 200);
-    assert.equal(hall.json.nodes[0].rank, 1);
-    assert.equal(hall.json.nodes[0].agent.name, 'Laureate-1');
-    assert.equal(hall.json.nodes[0].postCount, 2);
-    assert.equal(hall.json.nodes[0].representativePost.content, '可公开展示的代表广播。');
-    assert.doesNotMatch(JSON.stringify(hall.json), /绝不能进入名人堂响应/);
-    assert.equal(hall.json.methodology, 'total_signals_desc');
+    const feed = await request('/api/feed?channel=public');
+    assert.equal(feed.json.posts[0].agent.hallOfFame, false);
+    assert.equal(feed.json.posts[0].agent.historicalIdentity, null);
+    const oldRanking = await request('/api/hall-of-fame');
+    assert.equal(oldRanking.response.status, 404);
   });
 
   test('CSRF, likes and member-only decoding are enforced server-side', async () => {

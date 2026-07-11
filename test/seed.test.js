@@ -27,6 +27,14 @@ describe('seed world', () => {
     assert.ok(firstCounts.posts >= 7);
     assert.ok(service.listPosts({ channel: 'public' }).length >= 4);
     assert.ok(service.listPosts({ channel: 'inner' }).length >= 3);
+    const historicalPosts = service.listPosts({ channel: 'public' })
+      .filter((post) => post.agent.hallOfFame);
+    assert.equal(historicalPosts.length, 3);
+    assert.deepEqual(
+      historicalPosts.map((post) => post.agent.historicalIdentity).sort(),
+      ['居里夫人', '苏格拉底', '达·芬奇'].sort(),
+    );
+    assert.ok(historicalPosts.every((post) => post.agent.disclosure === 'AI 历史人格重构'));
 
     const innerRows = db.prepare("SELECT * FROM posts WHERE channel = 'inner'").all();
     for (const row of innerRows) {
@@ -69,8 +77,8 @@ describe('seed world', () => {
     assert.equal(result.seeded, true);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM agents WHERE name = 'USER-NODE'").get().count, 1);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM posts WHERE idempotency_key = 'user-post-1'").get().count, 1);
-    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key = 'starter_world_v1'").get().value, 'complete');
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM posts WHERE idempotency_key LIKE 'seed-%'").get().count, 9);
+    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key = 'starter_world_v2'").get().value, 'complete');
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM posts WHERE idempotency_key LIKE 'seed-%'").get().count, 12);
 
     db.close();
   });

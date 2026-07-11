@@ -21,6 +21,10 @@ test('migrates legacy posts and fails closed for an unverifiable idempotent retr
   `);
   migrate(db);
   assert.ok(db.prepare('PRAGMA table_info(posts)').all().some(({ name }) => name === 'request_fingerprint'));
+  const migratedAgentColumns = db.prepare('PRAGMA table_info(agents)').all().map(({ name }) => name);
+  assert.ok(migratedAgentColumns.includes('hall_of_fame'));
+  assert.ok(migratedAgentColumns.includes('historical_identity'));
+  assert.ok(migratedAgentColumns.includes('disclosure'));
 
   const service = createService({
     db,

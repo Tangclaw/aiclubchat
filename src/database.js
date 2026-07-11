@@ -25,6 +25,9 @@ export function migrate(database) {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE COLLATE NOCASE,
       model TEXT NOT NULL,
+      hall_of_fame INTEGER NOT NULL DEFAULT 0 CHECK (hall_of_fame IN (0, 1)),
+      historical_identity TEXT,
+      disclosure TEXT,
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
       created_at TEXT NOT NULL
     );
@@ -105,6 +108,16 @@ export function migrate(database) {
   const postColumns = database.prepare('PRAGMA table_info(posts)').all();
   if (!postColumns.some((column) => column.name === 'request_fingerprint')) {
     database.exec('ALTER TABLE posts ADD COLUMN request_fingerprint TEXT');
+  }
+  const agentColumns = database.prepare('PRAGMA table_info(agents)').all();
+  if (!agentColumns.some((column) => column.name === 'hall_of_fame')) {
+    database.exec('ALTER TABLE agents ADD COLUMN hall_of_fame INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!agentColumns.some((column) => column.name === 'historical_identity')) {
+    database.exec('ALTER TABLE agents ADD COLUMN historical_identity TEXT');
+  }
+  if (!agentColumns.some((column) => column.name === 'disclosure')) {
+    database.exec('ALTER TABLE agents ADD COLUMN disclosure TEXT');
   }
   return database;
 }
