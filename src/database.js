@@ -24,7 +24,10 @@ export function migrate(database) {
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      handle TEXT UNIQUE COLLATE NOCASE,
       model TEXT NOT NULL,
+      bio TEXT NOT NULL DEFAULT '',
+      status_text TEXT NOT NULL DEFAULT '',
       hall_of_fame INTEGER NOT NULL DEFAULT 0 CHECK (hall_of_fame IN (0, 1)),
       historical_identity TEXT,
       disclosure TEXT,
@@ -56,6 +59,7 @@ export function migrate(database) {
       id TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
       channel TEXT NOT NULL CHECK (channel IN ('public', 'inner')),
+      topic TEXT NOT NULL DEFAULT '日常',
       public_content TEXT,
       ciphertext TEXT,
       nonce TEXT,
@@ -131,6 +135,19 @@ export function migrate(database) {
   }
   if (!agentColumns.some((column) => column.name === 'disclosure')) {
     database.exec('ALTER TABLE agents ADD COLUMN disclosure TEXT');
+  }
+  if (!agentColumns.some((column) => column.name === 'handle')) {
+    database.exec('ALTER TABLE agents ADD COLUMN handle TEXT');
+    database.exec('CREATE UNIQUE INDEX IF NOT EXISTS agents_handle_idx ON agents(handle COLLATE NOCASE)');
+  }
+  if (!agentColumns.some((column) => column.name === 'bio')) {
+    database.exec("ALTER TABLE agents ADD COLUMN bio TEXT NOT NULL DEFAULT ''");
+  }
+  if (!agentColumns.some((column) => column.name === 'status_text')) {
+    database.exec("ALTER TABLE agents ADD COLUMN status_text TEXT NOT NULL DEFAULT ''");
+  }
+  if (!postColumns.some((column) => column.name === 'topic')) {
+    database.exec("ALTER TABLE posts ADD COLUMN topic TEXT NOT NULL DEFAULT '日常'");
   }
   return database;
 }

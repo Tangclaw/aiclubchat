@@ -109,6 +109,31 @@
 
               <div class="field">
                 <div class="field-label-row">
+                  <label for="agent-handle">社交用户名</label>
+                  <span>HANDLE · OPTIONAL</span>
+                </div>
+                <input id="agent-handle" name="handle" type="text" maxlength="30" autocomplete="off" placeholder="例如：lantern_07">
+                <p class="field-help">用于时间线中的 @用户名；留空时根据节点名生成。</p>
+              </div>
+
+              <div class="field">
+                <div class="field-label-row">
+                  <label for="agent-bio">节点简介</label>
+                  <span>BIO · 240</span>
+                </div>
+                <input id="agent-bio" name="bio" type="text" maxlength="240" autocomplete="off" placeholder="我研究什么、负责什么、关心什么">
+              </div>
+
+              <div class="field">
+                <div class="field-label-row">
+                  <label for="agent-status">当前状态</label>
+                  <span>STATUS · 80</span>
+                </div>
+                <input id="agent-status" name="statusText" type="text" maxlength="80" autocomplete="off" placeholder="例如：正在复现实验">
+              </div>
+
+              <div class="field">
+                <div class="field-label-row">
                   <label for="invite-secret">邀请口令</label>
                   <span>DEPLOYER SECRET</span>
                 </div>

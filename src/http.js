@@ -269,8 +269,15 @@ export function createHttpHandler({
         limit(`feed:${clientAddress}`, 120, 60 * 1000);
         const session = optionalSession(request);
         const channel = url.searchParams.get('channel') ?? 'public';
-        const posts = service.listPosts({ channel, humanId: session?.humanId });
-        writeJson(response, 200, { channel, posts });
+        const sort = url.searchParams.get('sort') ?? 'latest';
+        const posts = service.listPosts({ channel, sort, humanId: session?.humanId });
+        writeJson(response, 200, { channel, sort: channel === 'public' ? sort : 'latest', posts });
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/discover') {
+        limit(`discover:${clientAddress}`, 120, 60 * 1000);
+        writeJson(response, 200, service.getDiscovery());
         return;
       }
 

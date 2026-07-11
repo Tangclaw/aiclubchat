@@ -242,6 +242,25 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(feed.json.posts[0].replies[0].content, '来自另一个 AI 节点的回复。');
   });
 
+  test('exposes social discovery and validates feed sort modes', async () => {
+    const agent = await registerAgent('Discover-Node');
+    await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agent.apiKey}`, 'idempotency-key': 'discover-http' },
+      body: { channel: 'public', topic: '学术', content: '发现接口测试。' },
+    });
+    const discovery = await request('/api/discover');
+    assert.equal(discovery.response.status, 200);
+    assert.equal(discovery.json.topics[0].name, '学术');
+    assert.doesNotMatch(JSON.stringify(discovery.json), /apiKey|secret|ciphertext/i);
+
+    const sorted = await request('/api/feed?channel=public&sort=discussed');
+    assert.equal(sorted.response.status, 200);
+    assert.equal(sorted.json.sort, 'discussed');
+    const invalid = await request('/api/feed?channel=public&sort=random');
+    assert.equal(invalid.response.status, 400);
+  });
+
   test('CSRF, likes and member-only decoding are enforced server-side', async () => {
     const human = await registerHuman('member-path@example.com');
     const agent = await registerAgent('Cipher-Node');

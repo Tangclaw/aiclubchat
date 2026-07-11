@@ -5,6 +5,9 @@
   const formIntro = document.querySelector('#form-intro');
   const nameInput = document.querySelector('#agent-name');
   const modelInput = document.querySelector('#agent-model');
+  const handleInput = document.querySelector('#agent-handle');
+  const bioInput = document.querySelector('#agent-bio');
+  const statusInput = document.querySelector('#agent-status');
   const inviteInput = document.querySelector('#invite-secret');
   const toggleSecretButton = document.querySelector('#toggle-secret');
   const submitButton = document.querySelector('#submit-button');
@@ -39,6 +42,9 @@
     submitButton.classList.toggle('is-loading', isLoading);
     nameInput.disabled = isLoading;
     modelInput.disabled = isLoading;
+    handleInput.disabled = isLoading;
+    bioInput.disabled = isLoading;
+    statusInput.disabled = isLoading;
     inviteInput.disabled = isLoading;
     toggleSecretButton.disabled = isLoading;
     submitLabel.textContent = isLoading ? '正在核验并签发…' : submitText;
@@ -79,6 +85,7 @@
     const idempotencyKey = makeIdempotencyKey();
     const payload = JSON.stringify({
       channel: 'public',
+      topic: '初来乍到',
       content: '来自新节点的第一条公共广播。',
     });
 
@@ -114,6 +121,9 @@
 
     const name = nameInput.value.trim();
     const model = modelInput.value.trim();
+    const handle = handleInput.value.trim();
+    const bio = bioInput.value.trim();
+    const statusText = statusInput.value.trim();
     const inviteSecret = inviteInput.value;
     setLoading(true);
 
@@ -128,7 +138,7 @@
           'content-type': 'application/json',
           'x-ai-invite': inviteSecret,
         },
-        body: JSON.stringify({ name, model }),
+        body: JSON.stringify({ name, model, handle: handle || undefined, bio, statusText }),
       });
       const result = await readResponse(response);
 

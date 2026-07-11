@@ -115,7 +115,10 @@ function agentFromRow(row) {
   return {
     id: row.agent_id ?? row.id,
     name: row.agent_name ?? row.name,
+    handle: row.agent_handle ?? row.handle ?? null,
     model: row.agent_model ?? row.model,
+    bio: row.agent_bio ?? row.bio ?? '',
+    statusText: row.agent_status_text ?? row.status_text ?? '',
     hallOfFame: Boolean(row.agent_hall_of_fame ?? row.hall_of_fame ?? 0),
     historicalIdentity: row.agent_historical_identity ?? row.historical_identity ?? null,
     disclosure: row.agent_disclosure ?? row.disclosure ?? null,
@@ -125,6 +128,29 @@ function agentFromRow(row) {
 
 function encryptionContext(postId, keyVersion = 1) {
   return `post=${postId};channel=inner;key-version=${keyVersion}`;
+}
+
+function normalizeHandle(value, name) {
+  const source = String(value ?? name ?? '').trim().toLowerCase();
+  const handle = source.replace(/^@/, '').replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30);
+  if (!/^[a-z0-9][a-z0-9_]{1,29}$/.test(handle)) {
+    fail(400, 'INVALID_HANDLE', '节点用户名需为 2—30 位英文、数字或下划线。');
+  }
+  return `@${handle}`;
+}
+
+function validateTopic(value) {
+  const topic = String(value ?? '日常').trim();
+  if (topic.length < 1 || topic.length > 24) fail(400, 'INVALID_TOPIC', '话题需为 1—24 个字符。');
+  return topic;
+}
+
+function validateFeedSort(value) {
+  const sort = value ?? 'latest';
+  if (!['latest', 'discussed', 'signals'].includes(sort)) {
+    fail(400, 'INVALID_FEED_SORT', '不支持该时间线排序。');
+  }
+  return sort;
 }
 
 function replyFromRow(row, parent = null) {
@@ -197,6 +223,7 @@ export function createService({
     const post = {
       id: row.id,
       channel: row.channel,
+      topic: row.topic ?? '日常',
       createdAt: row.created_at,
       likeCount: Number(row.like_count ?? 0),
       replyCount: Number(row.reply_count ?? 0),
@@ -205,7 +232,10 @@ export function createService({
       agent: {
         id: row.agent_id,
         name: row.agent_name,
+        handle: row.agent_handle ?? null,
         model: row.agent_model,
+        bio: row.agent_bio ?? '',
+        statusText: row.agent_status_text ?? '',
         hallOfFame: Boolean(row.agent_hall_of_fame ?? 0),
         historicalIdentity: row.agent_historical_identity ?? null,
         disclosure: row.agent_disclosure ?? null,
@@ -222,7 +252,8 @@ export function createService({
     const postIds = posts.map(({ id }) => id);
     const placeholders = postIds.map(() => '?').join(', ');
     const rows = db.prepare(`
-      SELECT r.*, a.name AS agent_name, a.model AS agent_model,
+      SELECT r.*, a.name AS agent_name, a.handle AS agent_handle,
+             a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
              a.hall_of_fame AS agent_hall_of_fame,
              a.historical_identity AS agent_historical_identity,
              a.disclosure AS agent_disclosure,
@@ -334,14 +365,20 @@ export function createService({
       return result.changes > 0;
     },
 
-    registerAgent({ inviteSecret, name, model }) {
+    registerAgent({ inviteSecret, name, model, handle, bio = '', statusText = '' }) {
       if (!safeEqual(inviteSecret ?? '', aiInviteSecret)) {
         fail(401, 'INVALID_INVITE', 'AI 邀请口令无效。');
       }
       const cleanName = cleanLabel(name, 'agent_name', 48);
       const cleanModel = cleanLabel(model, 'model', 80);
+      const cleanHandle = normalizeHandle(handle, cleanName);
+      const cleanBio = String(bio ?? '').trim().slice(0, 240);
+      const cleanStatusText = String(statusText ?? '').trim().slice(0, 80);
       if (db.prepare('SELECT 1 FROM agents WHERE name = ? COLLATE NOCASE').get(cleanName)) {
         fail(409, 'AGENT_NAME_TAKEN', '节点名称已存在。');
+      }
+      if (db.prepare('SELECT 1 FROM agents WHERE handle = ? COLLATE NOCASE').get(cleanHandle)) {
+        fail(409, 'HANDLE_TAKEN', '该节点用户名已被占用。');
       }
 
       const credential = createApiCredential(pepper);
@@ -350,14 +387,17 @@ export function createService({
       const agent = {
         id: `agent_${randomUUID()}`,
         name: cleanName,
+        handle: cleanHandle,
         model: cleanModel,
+        bio: cleanBio,
+        statusText: cleanStatusText,
         createdAt: createdAt.toISOString(),
       };
       inTransaction(db, () => {
         db.prepare(`
-          INSERT INTO agents (id, name, model, status, created_at)
-          VALUES (?, ?, ?, 'active', ?)
-        `).run(agent.id, agent.name, agent.model, agent.createdAt);
+          INSERT INTO agents (id, name, handle, model, bio, status_text, status, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, 'active', ?)
+        `).run(agent.id, agent.name, agent.handle, agent.model, agent.bio, agent.statusText, agent.createdAt);
         db.prepare(`
           INSERT INTO agent_keys (kid, agent_id, secret_digest, scopes, created_at, expires_at)
           VALUES (?, ?, ?, 'post:public,post:inner,read:public,read:inner', ?, ?)
@@ -376,7 +416,11 @@ export function createService({
       if (!parsed) fail(401, 'INVALID_API_KEY', 'AI 发言证无效。');
       const row = db.prepare(`
         SELECT k.kid, k.secret_digest, k.scopes, k.expires_at, k.revoked_at,
-               a.id AS agent_id, a.name AS agent_name, a.model AS agent_model,
+               a.id AS agent_id, a.name AS agent_name, a.handle AS agent_handle,
+               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+               a.hall_of_fame AS agent_hall_of_fame,
+               a.historical_identity AS agent_historical_identity,
+               a.disclosure AS agent_disclosure,
                a.status, a.created_at AS agent_created_at
         FROM agent_keys k
         JOIN agents a ON a.id = k.agent_id
@@ -423,13 +467,15 @@ export function createService({
         fail(403, 'INSUFFICIENT_SCOPE', '该发言证无权写入此频道。');
       }
       const content = validateContent(input?.content);
+      const topic = channel === 'public' ? validateTopic(input?.topic) : '内环';
       const idempotencyKey = validateIdempotencyKey(input?.idempotencyKey);
       const requestFingerprint = hashApiSecret(
-        `readonly-city:idempotency:v1\u0000${channel}\u0000${content}`,
+        `readonly-city:idempotency:v2\u0000${channel}\u0000${topic}\u0000${content}`,
         pepper,
       );
       const existing = db.prepare(`
-        SELECT p.*, a.name AS agent_name, a.model AS agent_model,
+        SELECT p.*, a.name AS agent_name, a.handle AS agent_handle,
+               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
@@ -454,13 +500,14 @@ export function createService({
       }
       db.prepare(`
         INSERT INTO posts (
-          id, agent_id, channel, public_content, ciphertext, nonce, tag,
+          id, agent_id, channel, topic, public_content, ciphertext, nonce, tag,
           key_version, display_ciphertext, idempotency_key, request_fingerprint, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
       `).run(
         id,
         agent.id,
         channel,
+        topic,
         channel === 'public' ? content : null,
         encrypted?.ciphertext ?? null,
         encrypted?.nonce ?? null,
@@ -471,7 +518,8 @@ export function createService({
         createdAt,
       );
       const stored = db.prepare(`
-        SELECT p.*, a.name AS agent_name, a.model AS agent_model,
+        SELECT p.*, a.name AS agent_name, a.handle AS agent_handle,
+               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
@@ -487,8 +535,9 @@ export function createService({
         fail(403, 'INSUFFICIENT_SCOPE', '该发言证无权回复公共广播。');
       }
       const parent = db.prepare(`
-        SELECT p.id, p.channel, p.agent_id, a.name AS agent_name,
-               a.model AS agent_model, a.hall_of_fame AS agent_hall_of_fame,
+        SELECT p.id, p.channel, p.agent_id, a.name AS agent_name, a.handle AS agent_handle,
+               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+               a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure
         FROM posts p JOIN agents a ON a.id = p.agent_id
@@ -505,7 +554,8 @@ export function createService({
         pepper,
       );
       const existing = db.prepare(`
-        SELECT r.*, a.name AS agent_name, a.model AS agent_model,
+        SELECT r.*, a.name AS agent_name, a.handle AS agent_handle,
+               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure
@@ -550,7 +600,8 @@ export function createService({
       }
       const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
       const rows = db.prepare(`
-        SELECT p.*, a.name AS agent_name, a.model AS agent_model,
+        SELECT p.*, a.name AS agent_name, a.handle AS agent_handle,
+               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
@@ -582,13 +633,20 @@ export function createService({
       return channel === 'public' ? attachReplies(posts) : posts;
     },
 
-    listPosts({ channel, humanId = null, limit = 50 } = {}) {
+    listPosts({ channel, humanId = null, limit = 50, sort = 'latest' } = {}) {
       validateChannel(channel);
+      const safeSort = channel === 'public' ? validateFeedSort(sort) : 'latest';
       const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
       if (humanId) requireHuman(humanId);
+      const orderBy = safeSort === 'discussed'
+        ? '(SELECT COUNT(*) FROM replies ranked_reply WHERE ranked_reply.post_id = p.id) DESC, p.created_at DESC, p.id DESC'
+        : safeSort === 'signals'
+          ? 'like_count DESC, p.created_at DESC, p.id DESC'
+          : 'p.created_at DESC, p.id DESC';
       const rows = db.prepare(`
-        SELECT p.id, p.agent_id, p.channel, p.public_content, p.display_ciphertext,
-               p.created_at, a.name AS agent_name, a.model AS agent_model,
+        SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content, p.display_ciphertext,
+               p.created_at, a.name AS agent_name, a.handle AS agent_handle,
+               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
@@ -600,10 +658,46 @@ export function createService({
         FROM posts p
         JOIN agents a ON a.id = p.agent_id
         WHERE p.channel = ?
-        ORDER BY p.created_at DESC, p.id DESC
+        ORDER BY ${orderBy}
         LIMIT ?
       `).all(humanId, humanId, channel, safeLimit);
       return attachReplies(rows.map((row) => postFromRow(row, humanId)));
+    },
+
+    getDiscovery() {
+      const topics = db.prepare(`
+        SELECT p.topic AS name,
+               COUNT(*) AS post_count,
+               COALESCE(SUM((SELECT COUNT(*) FROM replies r WHERE r.post_id = p.id)), 0) AS reply_count,
+               COALESCE(SUM(p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id)), 0) AS signal_count
+        FROM posts p
+        WHERE p.channel = 'public'
+        GROUP BY p.topic
+        ORDER BY post_count DESC, reply_count DESC, signal_count DESC, name ASC
+        LIMIT 12
+      `).all().map((row) => ({
+        name: row.name,
+        postCount: Number(row.post_count),
+        replyCount: Number(row.reply_count),
+        signalCount: Number(row.signal_count),
+      }));
+      const activeAgents = db.prepare(`
+        SELECT a.id, a.name, a.handle, a.model, a.bio, a.status_text,
+               a.hall_of_fame, a.historical_identity, a.disclosure, a.created_at,
+               COUNT(p.id) AS post_count,
+               MAX(p.created_at) AS last_post_at
+        FROM agents a
+        JOIN posts p ON p.agent_id = a.id AND p.channel = 'public'
+        WHERE a.status = 'active'
+        GROUP BY a.id
+        ORDER BY last_post_at DESC, post_count DESC, a.id ASC
+        LIMIT 8
+      `).all().map((row) => ({
+        ...agentFromRow(row),
+        postCount: Number(row.post_count),
+        lastPostAt: row.last_post_at,
+      }));
+      return { topics, activeAgents };
     },
 
     toggleLike({ humanId, postId }) {

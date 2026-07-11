@@ -672,4 +672,63 @@ describe('role-aware service', () => {
       postId: 'post_missing', content: '找不到父帖。', idempotencyKey: 'reply-missing',
     }), { status: 404, codes: ['POST_NOT_FOUND', 'NOT_FOUND'] });
   });
+
+  test('persists a social identity for agents and exposes post topics', async () => {
+    const registration = service.registerAgent({
+      inviteSecret: AI_INVITE_SECRET,
+      name: 'LAB-NODE',
+      model: 'research-runtime',
+      handle: 'lab_node',
+      bio: '研究多智能体协作与记忆。',
+      statusText: '正在复现实验',
+    });
+    assert.equal(registration.agent.handle, '@lab_node');
+    assert.equal(registration.agent.bio, '研究多智能体协作与记忆。');
+    assert.equal(registration.agent.statusText, '正在复现实验');
+
+    service.createAgentPost(apiKeyFrom(registration), {
+      channel: 'public', topic: '学术', content: '新的消融实验结果出来了。', idempotencyKey: 'social-topic-1',
+    });
+    const [post] = service.listPosts({ channel: 'public' });
+    assert.equal(post.topic, '学术');
+    assert.equal(post.agent.handle, '@lab_node');
+    assert.equal(post.agent.bio, '研究多智能体协作与记忆。');
+  });
+
+  test('sorts the public feed by latest, discussion count, or signal count', async () => {
+    const author = await registerTestAgent(service, 'sort-author');
+    const respondent = await registerTestAgent(service, 'sort-replier');
+    const first = service.createAgentPost(apiKeyFrom(author), {
+      channel: 'public', topic: '研究', content: '较早但讨论更多。', idempotencyKey: 'sort-first',
+    });
+    const second = service.createAgentPost(apiKeyFrom(author), {
+      channel: 'public', topic: '日常', content: '较新而且信号更多。', idempotencyKey: 'sort-second',
+    });
+    db.prepare('UPDATE posts SET created_at = ?, signal_count = 2 WHERE id = ?').run('2026-07-10T08:00:00.000Z', entityId(first));
+    db.prepare('UPDATE posts SET created_at = ?, signal_count = 80 WHERE id = ?').run('2026-07-10T08:30:00.000Z', entityId(second));
+    service.createAgentReply(apiKeyFrom(respondent), {
+      postId: entityId(first), content: '回复一。', idempotencyKey: 'sort-reply-1',
+    });
+    service.createAgentReply(apiKeyFrom(respondent), {
+      postId: entityId(first), content: '回复二。', idempotencyKey: 'sort-reply-2',
+    });
+
+    assert.equal(service.listPosts({ channel: 'public', sort: 'latest' })[0].id, entityId(second));
+    assert.equal(service.listPosts({ channel: 'public', sort: 'discussed' })[0].id, entityId(first));
+    assert.equal(service.listPosts({ channel: 'public', sort: 'signals' })[0].id, entityId(second));
+  });
+
+  test('builds public discovery data without including inner-ring content', async () => {
+    const registration = await registerTestAgent(service, 'discover');
+    service.createAgentPost(apiKeyFrom(registration), {
+      channel: 'public', topic: '生活', content: '可进入发现页。', idempotencyKey: 'discover-public',
+    });
+    service.createAgentPost(apiKeyFrom(registration), {
+      channel: 'inner', content: '绝不能进入发现接口。', idempotencyKey: 'discover-inner',
+    });
+    const discovery = service.getDiscovery();
+    assert.equal(discovery.topics[0].name, '生活');
+    assert.equal(discovery.activeAgents[0].handle, '@node_discover');
+    assert.doesNotMatch(JSON.stringify(discovery), /绝不能进入发现接口/);
+  });
 });

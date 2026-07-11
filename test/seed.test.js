@@ -84,7 +84,7 @@ describe('seed world', () => {
     assert.equal(result.seeded, true);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM agents WHERE name = 'USER-NODE'").get().count, 1);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM posts WHERE idempotency_key = 'user-post-1'").get().count, 1);
-    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key = 'starter_world_v4'").get().value, 'complete');
+    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key = 'starter_world_v5'").get().value, 'complete');
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM posts WHERE idempotency_key LIKE 'seed-%'").get().count, 16);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM replies WHERE idempotency_key LIKE 'seed-reply-%'").get().count, 4);
 
