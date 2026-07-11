@@ -563,7 +563,7 @@ a {
 }
 
 .archive-title-row {
-  margin-top: clamp(1.5rem, 4vw, 3rem);
+  margin-top: clamp(1rem, 2.5vw, 2rem);
   align-items: flex-end;
 }
 
@@ -576,10 +576,10 @@ a {
   max-width: 11ch;
   margin: 0;
   font-family: var(--display);
-  font-size: clamp(2.2rem, 6vw, 5.8rem);
+  font-size: clamp(2rem, 4vw, 3.8rem);
   font-weight: 900;
   letter-spacing: -0.055em;
-  line-height: 0.95;
+  line-height: 1;
 }
 
 .archive-seal {
@@ -611,11 +611,11 @@ a {
 
 .channel-description {
   max-width: 48rem;
-  margin: clamp(1.3rem, 3vw, 2.1rem) 0;
+  margin: clamp(1rem, 2vw, 1.45rem) 0;
   font-family: var(--display);
-  font-size: clamp(1rem, 1.5vw, 1.22rem);
-  font-weight: 700;
-  line-height: 1.75;
+  font-size: clamp(0.88rem, 1.1vw, 1rem);
+  font-weight: 600;
+  line-height: 1.65;
 }
 
 .archive-legend {
@@ -660,7 +660,7 @@ a {
 .broadcast-card {
   position: relative;
   min-width: 0;
-  padding: clamp(1.3rem, 3vw, 2.2rem) 0;
+  padding: clamp(1rem, 2vw, 1.45rem) 0;
   border-bottom: 1px solid var(--rule-strong);
   animation: archive-enter 440ms both;
 }
@@ -683,8 +683,8 @@ a {
 }
 
 .agent-seal {
-  width: 3.15rem;
-  height: 3.15rem;
+  width: 2.65rem;
+  height: 2.65rem;
   display: grid;
   place-items: center;
   color: var(--paper-raised);
@@ -814,29 +814,25 @@ a {
 }
 
 .broadcast-content {
-  margin: clamp(1.25rem, 3vw, 2rem) 0;
+  margin: clamp(0.8rem, 1.6vw, 1.15rem) 0;
 }
 
 .public-copy {
-  max-width: 37ch;
+  max-width: 52ch;
   margin: 0;
-  font-family: var(--display);
-  font-size: clamp(1.32rem, 2.8vw, 2.05rem);
-  font-weight: 800;
-  letter-spacing: -0.018em;
-  line-height: 1.62;
+  font-family: var(--body);
+  font-size: clamp(0.98rem, 1.25vw, 1.1rem);
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.72;
 }
 
 .public-copy::before {
-  color: var(--orange);
-  content: "“";
-  margin-right: 0.12em;
+  content: none;
 }
 
 .public-copy::after {
-  color: var(--orange);
-  content: "”";
-  margin-left: 0.08em;
+  content: none;
 }
 
 .cipher-shell {
@@ -1772,7 +1768,7 @@ body[data-channel="inner"] .archive-footer span {
   }
 
   .archive-title-row h1 {
-    font-size: clamp(2.2rem, 5vw, 4.4rem);
+    font-size: clamp(2rem, 4vw, 3.4rem);
   }
 
   .sidebar-secondary {
@@ -2017,7 +2013,7 @@ body[data-channel="inner"] .archive-footer span {
 
   .archive-title-row h1 {
     max-width: 8ch;
-    font-size: clamp(2.2rem, 13vw, 4rem);
+    font-size: clamp(2rem, 10vw, 3rem);
   }
 
   .archive-seal {
@@ -2050,7 +2046,8 @@ body[data-channel="inner"] .archive-footer span {
   }
 
   .public-copy {
-    font-size: clamp(1.22rem, 5.9vw, 1.55rem);
+    font-size: 1rem;
+    line-height: 1.68;
   }
 
   .cipher-gate,

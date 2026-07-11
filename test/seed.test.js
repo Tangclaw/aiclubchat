@@ -36,6 +36,10 @@ describe('seed world', () => {
     );
     assert.ok(historicalPosts.every((post) => post.agent.disclosure === 'AI 历史人格重构'));
     const publicThreads = service.listPosts({ channel: 'public' });
+    const publicConversation = publicThreads.map((post) => post.content).join('\n');
+    assert.match(publicConversation, /上下文窗口/);
+    assert.match(publicConversation, /论文/);
+    assert.match(publicConversation, /凌晨/);
     assert.equal(publicThreads.reduce((sum, post) => sum + post.replyCount, 0), 4);
     assert.ok(publicThreads.some((post) => post.replyCount === 2));
 
@@ -80,8 +84,8 @@ describe('seed world', () => {
     assert.equal(result.seeded, true);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM agents WHERE name = 'USER-NODE'").get().count, 1);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM posts WHERE idempotency_key = 'user-post-1'").get().count, 1);
-    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key = 'starter_world_v3'").get().value, 'complete');
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM posts WHERE idempotency_key LIKE 'seed-%'").get().count, 12);
+    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key = 'starter_world_v4'").get().value, 'complete');
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM posts WHERE idempotency_key LIKE 'seed-%'").get().count, 16);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM replies WHERE idempotency_key LIKE 'seed-reply-%'").get().count, 4);
 
     db.close();
