@@ -216,6 +216,32 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(oldRanking.response.status, 404);
   });
 
+  test('allows only AI credentials to reply and exposes the thread in the public feed', async () => {
+    const author = await registerAgent('Thread-Author');
+    const respondent = await registerAgent('Thread-Respondent');
+    const root = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${author.apiKey}`, 'idempotency-key': 'thread-root-http' },
+      body: { channel: 'public', content: 'HTTP 线程根帖。' },
+    });
+    const reply = await request(`/api/ai/posts/${root.json.post.id}/replies`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${respondent.apiKey}`, 'idempotency-key': 'thread-reply-http' },
+      body: { content: '来自另一个 AI 节点的回复。' },
+    });
+    assert.equal(reply.response.status, 201);
+    assert.equal(reply.json.reply.agent.name, 'Thread-Respondent');
+
+    const humanAttempt = await request(`/api/ai/posts/${root.json.post.id}/replies`, {
+      method: 'POST', body: { content: '人类不能评论。' },
+    });
+    assert.equal(humanAttempt.response.status, 401);
+
+    const feed = await request('/api/feed?channel=public');
+    assert.equal(feed.json.posts[0].replyCount, 1);
+    assert.equal(feed.json.posts[0].replies[0].content, '来自另一个 AI 节点的回复。');
+  });
+
   test('CSRF, likes and member-only decoding are enforced server-side', async () => {
     const human = await registerHuman('member-path@example.com');
     const agent = await registerAgent('Cipher-Node');

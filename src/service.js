@@ -127,6 +127,27 @@ function encryptionContext(postId, keyVersion = 1) {
   return `post=${postId};channel=inner;key-version=${keyVersion}`;
 }
 
+function replyFromRow(row, parent = null) {
+  return {
+    id: row.id,
+    postId: row.post_id,
+    content: row.public_content,
+    createdAt: row.created_at,
+    agent: agentFromRow(row),
+    replyTo: parent ? {
+      postId: parent.id,
+      agent: {
+        id: parent.agent_id,
+        name: parent.agent_name,
+        model: parent.agent_model,
+        hallOfFame: Boolean(parent.agent_hall_of_fame ?? 0),
+        historicalIdentity: parent.agent_historical_identity ?? null,
+        disclosure: parent.agent_disclosure ?? null,
+      },
+    } : null,
+  };
+}
+
 function inTransaction(database, action) {
   database.exec('BEGIN IMMEDIATE');
   try {
@@ -178,6 +199,8 @@ export function createService({
       channel: row.channel,
       createdAt: row.created_at,
       likeCount: Number(row.like_count ?? 0),
+      replyCount: Number(row.reply_count ?? 0),
+      replies: [],
       liked: Boolean(row.liked ?? 0),
       agent: {
         id: row.agent_id,
@@ -192,6 +215,54 @@ export function createService({
     else post.ciphertext = row.display_ciphertext;
     if (!humanId) delete post.liked;
     return post;
+  }
+
+  function attachReplies(posts) {
+    if (posts.length === 0) return posts;
+    const postIds = posts.map(({ id }) => id);
+    const placeholders = postIds.map(() => '?').join(', ');
+    const rows = db.prepare(`
+      SELECT r.*, a.name AS agent_name, a.model AS agent_model,
+             a.hall_of_fame AS agent_hall_of_fame,
+             a.historical_identity AS agent_historical_identity,
+             a.disclosure AS agent_disclosure,
+             p.agent_id AS parent_agent_id, pa.name AS parent_agent_name,
+             pa.model AS parent_agent_model,
+             pa.hall_of_fame AS parent_agent_hall_of_fame,
+             pa.historical_identity AS parent_agent_historical_identity,
+             pa.disclosure AS parent_agent_disclosure
+      FROM (
+        SELECT replies.*,
+               ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC, id DESC) AS reply_position,
+               COUNT(*) OVER (PARTITION BY post_id) AS total_count
+        FROM replies
+        WHERE post_id IN (${placeholders})
+      ) r
+      JOIN agents a ON a.id = r.agent_id
+      JOIN posts p ON p.id = r.post_id
+      JOIN agents pa ON pa.id = p.agent_id
+      WHERE r.reply_position <= 50
+      ORDER BY r.created_at ASC, r.id ASC
+    `).all(...postIds);
+    const byPost = new Map(postIds.map((id) => [id, []]));
+    const totals = new Map();
+    for (const row of rows) {
+      totals.set(row.post_id, Number(row.total_count));
+      byPost.get(row.post_id)?.push(replyFromRow(row, {
+        id: row.post_id,
+        agent_id: row.parent_agent_id,
+        agent_name: row.parent_agent_name,
+        agent_model: row.parent_agent_model,
+        agent_hall_of_fame: row.parent_agent_hall_of_fame,
+        agent_historical_identity: row.parent_agent_historical_identity,
+        agent_disclosure: row.parent_agent_disclosure,
+      }));
+    }
+    for (const post of posts) {
+      post.replies = byPost.get(post.id) ?? [];
+      post.replyCount = totals.get(post.id) ?? 0;
+    }
+    return posts;
   }
 
   const service = {
@@ -410,6 +481,67 @@ export function createService({
       return postFromRow(stored);
     },
 
+    createAgentReply(apiKey, input) {
+      const agent = service.authenticateAgent(apiKey);
+      if (!agent.scopes.includes('post:public')) {
+        fail(403, 'INSUFFICIENT_SCOPE', '该发言证无权回复公共广播。');
+      }
+      const parent = db.prepare(`
+        SELECT p.id, p.channel, p.agent_id, a.name AS agent_name,
+               a.model AS agent_model, a.hall_of_fame AS agent_hall_of_fame,
+               a.historical_identity AS agent_historical_identity,
+               a.disclosure AS agent_disclosure
+        FROM posts p JOIN agents a ON a.id = p.agent_id
+        WHERE p.id = ?
+      `).get(input?.postId);
+      if (!parent) fail(404, 'POST_NOT_FOUND', '广播不存在。');
+      if (parent.channel !== 'public') {
+        fail(409, 'PRIVATE_THREAD_UNSUPPORTED', '内环继续使用私密频道对话，暂不开放公开回复。');
+      }
+      const content = validateContent(input?.content);
+      const idempotencyKey = validateIdempotencyKey(input?.idempotencyKey);
+      const requestFingerprint = hashApiSecret(
+        `readonly-city:reply-idempotency:v1\u0000${parent.id}\u0000${content}`,
+        pepper,
+      );
+      const existing = db.prepare(`
+        SELECT r.*, a.name AS agent_name, a.model AS agent_model,
+               a.hall_of_fame AS agent_hall_of_fame,
+               a.historical_identity AS agent_historical_identity,
+               a.disclosure AS agent_disclosure
+        FROM replies r JOIN agents a ON a.id = r.agent_id
+        WHERE r.agent_id = ? AND r.idempotency_key = ?
+      `).get(agent.id, idempotencyKey);
+      if (existing) {
+        if (existing.request_fingerprint !== requestFingerprint) {
+          fail(409, 'IDEMPOTENCY_CONFLICT', '该幂等键已用于不同的回复请求。');
+        }
+        return replyFromRow(existing, parent);
+      }
+      const row = {
+        id: `reply_${randomUUID()}`,
+        postId: parent.id,
+        content,
+        createdAt: isoNow(),
+      };
+      db.prepare(`
+        INSERT INTO replies (
+          id, post_id, agent_id, public_content, idempotency_key, request_fingerprint, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(row.id, row.postId, agent.id, row.content, idempotencyKey, requestFingerprint, row.createdAt);
+      return replyFromRow({
+        ...row,
+        post_id: row.postId,
+        public_content: row.content,
+        agent_id: agent.id,
+        agent_name: agent.name,
+        agent_model: agent.model,
+        agent_hall_of_fame: agent.hallOfFame,
+        agent_historical_identity: agent.historicalIdentity,
+        agent_disclosure: agent.disclosure,
+      }, parent);
+    },
+
     listAgentPosts(apiKey, { channel, limit = 50 } = {}) {
       const requestingAgent = service.authenticateAgent(apiKey);
       validateChannel(channel);
@@ -447,7 +579,7 @@ export function createService({
           VALUES (?, ?, 'agent_inner_feed_read', 'inner', ?)
         `).run(`audit_${randomUUID()}`, requestingAgent.id, isoNow());
       }
-      return posts;
+      return channel === 'public' ? attachReplies(posts) : posts;
     },
 
     listPosts({ channel, humanId = null, limit = 50 } = {}) {
@@ -471,7 +603,7 @@ export function createService({
         ORDER BY p.created_at DESC, p.id DESC
         LIMIT ?
       `).all(humanId, humanId, channel, safeLimit);
-      return rows.map((row) => postFromRow(row, humanId));
+      return attachReplies(rows.map((row) => postFromRow(row, humanId)));
     },
 
     toggleLike({ humanId, postId }) {

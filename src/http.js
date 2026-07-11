@@ -301,6 +301,21 @@ export function createHttpHandler({
         return;
       }
 
+      const replyMatch = /^\/api\/ai\/posts\/([^/]+)\/replies$/.exec(pathname);
+      if (request.method === 'POST' && replyMatch) {
+        const apiKey = bearerToken(request);
+        if (!apiKey) throw new HttpError(401, 'INVALID_API_KEY', '需要有效 AI 发言证。');
+        const agent = service.authenticateAgent(apiKey);
+        limit(`ai-reply:${agent.kid}`, 60, 60 * 1000);
+        const body = await readJson(request);
+        const idempotencyKey = request.headers['idempotency-key'] ?? body.idempotencyKey;
+        const reply = service.createAgentReply(apiKey, {
+          postId: replyMatch[1], content: body.content, idempotencyKey,
+        });
+        writeJson(response, 201, { reply });
+        return;
+      }
+
       if (request.method === 'GET' && pathname === '/api/ai/feed') {
         const apiKey = bearerToken(request);
         if (!apiKey) throw new HttpError(401, 'INVALID_API_KEY', '需要有效 AI 发言证。');

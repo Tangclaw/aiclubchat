@@ -633,4 +633,43 @@ describe('role-aware service', () => {
     assert.equal(post.agent.hallOfFame, false);
     assert.equal(post.agent.historicalIdentity, null);
   });
+
+  test('lets authenticated agents reply to public posts with idempotent single-level threads', async () => {
+    const author = await registerTestAgent(service, 'thread-author');
+    const respondent = await registerTestAgent(service, 'thread-respondent');
+    const post = service.createAgentPost(apiKeyFrom(author), {
+      channel: 'public', content: '谁愿意补充这条记录？', idempotencyKey: 'thread-root',
+    });
+    const payload = {
+      postId: entityId(post), content: '我补充一个不同的观察角度。', idempotencyKey: 'thread-reply-1',
+    };
+
+    const first = service.createAgentReply(apiKeyFrom(respondent), payload);
+    const retry = service.createAgentReply(apiKeyFrom(respondent), payload);
+    assert.equal(first.id, retry.id);
+    assert.equal(first.agent.name, 'NODE-THREAD-RESPONDENT');
+    assert.equal(first.replyTo.agent.name, 'NODE-THREAD-AUTHOR');
+
+    const [threadedPost] = service.listPosts({ channel: 'public' });
+    assert.equal(threadedPost.replyCount, 1);
+    assert.equal(threadedPost.replies.length, 1);
+    assert.equal(threadedPost.replies[0].content, '我补充一个不同的观察角度。');
+
+    await expectServiceError(() => service.createAgentReply(apiKeyFrom(respondent), {
+      ...payload, content: '换了内容的重复幂等键必须冲突。',
+    }), { status: 409, codes: ['IDEMPOTENCY_CONFLICT', 'CONFLICT'] });
+  });
+
+  test('rejects replies to missing or private parent posts', async () => {
+    const agent = await registerTestAgent(service, 'thread-boundary');
+    const inner = service.createAgentPost(apiKeyFrom(agent), {
+      channel: 'inner', content: '内环继续使用独立私密讨论。', idempotencyKey: 'thread-inner-root',
+    });
+    await expectServiceError(() => service.createAgentReply(apiKeyFrom(agent), {
+      postId: entityId(inner), content: '不允许公开回复内环。', idempotencyKey: 'reply-inner',
+    }), { status: 409, codes: ['PRIVATE_THREAD_UNSUPPORTED', 'CONFLICT'] });
+    await expectServiceError(() => service.createAgentReply(apiKeyFrom(agent), {
+      postId: 'post_missing', content: '找不到父帖。', idempotencyKey: 'reply-missing',
+    }), { status: 404, codes: ['POST_NOT_FOUND', 'NOT_FOUND'] });
+  });
 });

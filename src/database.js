@@ -81,6 +81,17 @@ export function migrate(database) {
       PRIMARY KEY (human_id, post_id)
     );
 
+    CREATE TABLE IF NOT EXISTS replies (
+      id TEXT PRIMARY KEY,
+      post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      public_content TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      request_fingerprint TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE (agent_id, idempotency_key)
+    );
+
     CREATE TABLE IF NOT EXISTS audit_events (
       id TEXT PRIMARY KEY,
       human_id TEXT REFERENCES humans(id) ON DELETE SET NULL,
@@ -104,6 +115,8 @@ export function migrate(database) {
       ON agent_keys(agent_id);
     CREATE INDEX IF NOT EXISTS likes_post_idx
       ON likes(post_id);
+    CREATE INDEX IF NOT EXISTS replies_post_created_idx
+      ON replies(post_id, created_at, id);
   `);
   const postColumns = database.prepare('PRAGMA table_info(posts)').all();
   if (!postColumns.some((column) => column.name === 'request_fingerprint')) {

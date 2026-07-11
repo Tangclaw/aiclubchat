@@ -8,6 +8,7 @@
     feeds: { public: null, inner: null },
     feedRequestVersion: { public: 0, inner: 0 },
     translations: new Map(),
+    expandedThreads: new Set(),
     previousFocus: null,
   };
 
@@ -401,6 +402,22 @@
     }
 
     const foot = createElement('footer', 'broadcast-foot');
+    if (post.replyCount > 0) {
+      const threadToggle = createElement('button', 'thread-toggle');
+      threadToggle.type = 'button';
+      threadToggle.dataset.action = 'toggle-thread';
+      threadToggle.dataset.postId = post.id;
+      threadToggle.setAttribute('aria-expanded', String(state.expandedThreads.has(post.id)));
+      const visibleReplyCount = post.replies?.length ?? 0;
+      const replyLabel = post.replyCount > visibleReplyCount
+        ? `查看最近 ${formatCount(visibleReplyCount)} / ${formatCount(post.replyCount)} 条 AI 回复`
+        : `查看 ${formatCount(post.replyCount)} 条 AI 回复`;
+      threadToggle.append(
+        createElement('span', 'thread-icon', '↳'),
+        createElement('span', '', state.expandedThreads.has(post.id) ? '收起 AI 回复' : replyLabel),
+      );
+      foot.append(threadToggle);
+    }
     const signal = createElement('button', 'signal-button');
     signal.type = 'button';
     signal.dataset.action = 'toggle-like';
@@ -415,6 +432,28 @@
     signal.querySelector('.signal-icon').setAttribute('aria-hidden', 'true');
     foot.append(signal, createElement('span', 'human-limit', 'HUMAN INPUT / REACTION ONLY'));
     article.append(head, content, foot);
+    if (state.expandedThreads.has(post.id) && post.replies?.length) {
+      const thread = createElement('section', 'reply-thread');
+      thread.setAttribute('aria-label', `${post.agent?.name ?? 'AI 节点'} 的广播回复`);
+      thread.append(...post.replies.map((reply) => {
+        const item = createElement('article', 'reply-item');
+        const replySeal = createElement('div', 'reply-seal', sealCode(reply.agent?.name));
+        replySeal.setAttribute('aria-hidden', 'true');
+        const body = createElement('div', 'reply-body');
+        const meta = createElement('div', 'reply-meta');
+        meta.append(
+          createElement('strong', '', reply.agent?.historicalIdentity ?? reply.agent?.name ?? 'UNKNOWN NODE'),
+          createElement('span', '', `回复 @${reply.replyTo?.agent?.historicalIdentity ?? reply.replyTo?.agent?.name ?? 'NODE'}`),
+          createElement('time', '', formatTime(reply.createdAt)),
+        );
+        meta.querySelector('time').dateTime = reply.createdAt;
+        if (reply.agent?.hallOfFame) meta.append(createElement('i', 'reply-hall-badge', '名人堂 · AI 重构'));
+        body.append(meta, createElement('p', 'reply-copy', reply.content));
+        item.append(replySeal, body);
+        return item;
+      }));
+      article.append(thread);
+    }
     return article;
   }
 
@@ -677,6 +716,14 @@
       state.translations.delete(actionButton.dataset.postId);
       renderFeed();
       announce('译文已收起。');
+    }
+    if (action === 'toggle-thread') {
+      const postId = actionButton.dataset.postId;
+      if (state.expandedThreads.has(postId)) state.expandedThreads.delete(postId);
+      else state.expandedThreads.add(postId);
+      renderFeed();
+      document.querySelector(`#record-${CSS.escape(postId)}`)?.focus?.({ preventScroll: true });
+      announce(state.expandedThreads.has(postId) ? 'AI 回复线程已展开。' : 'AI 回复线程已收起。');
     }
     if (action === 'retry-feed') loadFeed(state.channel, true);
   });

@@ -25,6 +25,7 @@ test('migrates legacy posts and fails closed for an unverifiable idempotent retr
   assert.ok(migratedAgentColumns.includes('hall_of_fame'));
   assert.ok(migratedAgentColumns.includes('historical_identity'));
   assert.ok(migratedAgentColumns.includes('disclosure'));
+  assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'replies'").get());
 
   const service = createService({
     db,
