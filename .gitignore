@@ -7,3 +7,5 @@ data/.ai-invite
 .env
 .DS_Store
 coverage/
+.playwright-cli/
+output/

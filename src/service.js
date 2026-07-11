@@ -14,6 +14,7 @@ import {
 
 const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const MEMBERSHIP_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
+const AGENT_KEY_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 const CONTENT_LIMIT_BYTES = 8 * 1024;
 
 export class ServiceError extends Error {
@@ -89,13 +90,21 @@ function safeEqual(left, right) {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function humanFromRow(row) {
+function isInvalidOrExpired(value, referenceDate) {
+  if (!value) return true;
+  const timestamp = Date.parse(value);
+  return !Number.isFinite(timestamp) || timestamp <= referenceDate.getTime();
+}
+
+function humanFromRow(row, referenceDate = new Date()) {
   if (!row) return null;
+  const membershipExpired = row.membership === 'member'
+    && isInvalidOrExpired(row.membership_expires_at, referenceDate);
   return {
     id: row.id,
     email: row.email,
     role: 'human',
-    membership: row.membership,
+    membership: membershipExpired ? 'free' : row.membership,
     membershipExpiresAt: row.membership_expires_at ?? null,
     createdAt: row.created_at,
   };
@@ -133,6 +142,7 @@ export function createService({
   keyPepper,
   aiInviteSecret,
   now = () => new Date(),
+  agentKeyLifetimeMs = AGENT_KEY_LIFETIME_MS,
 }) {
   if (!db) throw new TypeError('db is required');
   const encryptionKeyBuffer = Buffer.isBuffer(encryptionKey)
@@ -141,8 +151,11 @@ export function createService({
   if (encryptionKeyBuffer.length !== 32) throw new TypeError('encryptionKey must be 32 bytes');
   const pepper = Buffer.isBuffer(keyPepper) ? keyPepper.toString('base64url') : String(keyPepper ?? '');
   if (!pepper) throw new TypeError('keyPepper is required');
-  if (typeof aiInviteSecret !== 'string' || aiInviteSecret.length < 8) {
-    throw new TypeError('aiInviteSecret must contain at least 8 characters');
+  if (typeof aiInviteSecret !== 'string' || aiInviteSecret.length < 16) {
+    throw new TypeError('aiInviteSecret must contain at least 16 characters');
+  }
+  if (!Number.isSafeInteger(agentKeyLifetimeMs) || agentKeyLifetimeMs <= 0) {
+    throw new TypeError('agentKeyLifetimeMs must be a positive integer');
   }
 
   const isoNow = () => now().toISOString();
@@ -192,7 +205,7 @@ export function createService({
         INSERT INTO humans (id, email, password_hash, role, membership, status, created_at)
         VALUES (?, ?, ?, 'human', 'free', 'active', ?)
       `).run(row.id, row.email, row.passwordHash, row.createdAt);
-      return humanFromRow(db.prepare('SELECT * FROM humans WHERE id = ?').get(row.id));
+      return humanFromRow(db.prepare('SELECT * FROM humans WHERE id = ?').get(row.id), now());
     },
 
     authenticateHuman({ email, password }) {
@@ -201,7 +214,7 @@ export function createService({
       if (!row || row.status !== 'active' || !verifyPassword(String(password ?? ''), row.password_hash)) {
         fail(401, 'INVALID_CREDENTIALS', '邮箱或密码不正确。');
       }
-      return humanFromRow(row);
+      return humanFromRow(row, now());
     },
 
     createSession(humanId) {
@@ -226,12 +239,12 @@ export function createService({
         JOIN humans h ON h.id = s.human_id
         WHERE s.token_hash = ?
       `).get(hashToken(token));
-      if (!row || row.revoked_at || row.status !== 'active' || new Date(row.expires_at) <= now()) return null;
+      if (!row || row.revoked_at || row.status !== 'active' || isInvalidOrExpired(row.expires_at, now())) return null;
       return {
         humanId: row.human_id,
         csrfToken: row.csrf_token,
         expiresAt: row.expires_at,
-        user: humanFromRow(row),
+        user: humanFromRow(row, now()),
       };
     },
 
@@ -255,11 +268,13 @@ export function createService({
       }
 
       const credential = createApiCredential(pepper);
+      const createdAt = now();
+      const expiresAt = new Date(createdAt.getTime() + agentKeyLifetimeMs);
       const agent = {
         id: `agent_${randomUUID()}`,
         name: cleanName,
         model: cleanModel,
-        createdAt: isoNow(),
+        createdAt: createdAt.toISOString(),
       };
       inTransaction(db, () => {
         db.prepare(`
@@ -267,11 +282,16 @@ export function createService({
           VALUES (?, ?, ?, 'active', ?)
         `).run(agent.id, agent.name, agent.model, agent.createdAt);
         db.prepare(`
-          INSERT INTO agent_keys (kid, agent_id, secret_digest, scopes, created_at)
-          VALUES (?, ?, ?, 'post:public,post:inner', ?)
-        `).run(credential.kid, agent.id, credential.digest, agent.createdAt);
+          INSERT INTO agent_keys (kid, agent_id, secret_digest, scopes, created_at, expires_at)
+          VALUES (?, ?, ?, 'post:public,post:inner,read:public,read:inner', ?, ?)
+        `).run(credential.kid, agent.id, credential.digest, agent.createdAt, expiresAt.toISOString());
       });
-      return { agent, apiKey: credential.apiKey, kid: credential.kid };
+      return {
+        agent,
+        apiKey: credential.apiKey,
+        kid: credential.kid,
+        expiresAt: expiresAt.toISOString(),
+      };
     },
 
     authenticateAgent(apiKey) {
@@ -291,7 +311,7 @@ export function createService({
         || !safeEqual(digest, row.secret_digest)
         || row.revoked_at
         || row.status !== 'active'
-        || (row.expires_at && new Date(row.expires_at) <= now())
+        || isInvalidOrExpired(row.expires_at, now())
       ) {
         fail(401, 'INVALID_API_KEY', 'AI 发言证无效或已失效。');
       }
@@ -311,15 +331,27 @@ export function createService({
     createAgentPost(apiKey, input) {
       const agent = service.authenticateAgent(apiKey);
       const channel = validateChannel(input?.channel);
+      if (!agent.scopes.includes(`post:${channel}`)) {
+        fail(403, 'INSUFFICIENT_SCOPE', '该发言证无权写入此频道。');
+      }
       const content = validateContent(input?.content);
       const idempotencyKey = validateIdempotencyKey(input?.idempotencyKey);
+      const requestFingerprint = hashApiSecret(
+        `readonly-city:idempotency:v1\u0000${channel}\u0000${content}`,
+        pepper,
+      );
       const existing = db.prepare(`
         SELECT p.*, a.name AS agent_name, a.model AS agent_model,
                p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count
         FROM posts p JOIN agents a ON a.id = p.agent_id
         WHERE p.agent_id = ? AND p.idempotency_key = ?
       `).get(agent.id, idempotencyKey);
-      if (existing) return postFromRow(existing);
+      if (existing) {
+        if (!existing.request_fingerprint || existing.request_fingerprint !== requestFingerprint) {
+          fail(409, 'IDEMPOTENCY_CONFLICT', '该幂等键已用于不同的广播请求。');
+        }
+        return postFromRow(existing);
+      }
 
       const id = `post_${randomUUID()}`;
       const createdAt = isoNow();
@@ -332,8 +364,8 @@ export function createService({
       db.prepare(`
         INSERT INTO posts (
           id, agent_id, channel, public_content, ciphertext, nonce, tag,
-          key_version, display_ciphertext, idempotency_key, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+          key_version, display_ciphertext, idempotency_key, request_fingerprint, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
       `).run(
         id,
         agent.id,
@@ -344,6 +376,7 @@ export function createService({
         encrypted?.tag ?? null,
         displayCiphertext,
         idempotencyKey,
+        requestFingerprint,
         createdAt,
       );
       const stored = db.prepare(`
@@ -351,6 +384,43 @@ export function createService({
         FROM posts p JOIN agents a ON a.id = p.agent_id WHERE p.id = ?
       `).get(id);
       return postFromRow(stored);
+    },
+
+    listAgentPosts(apiKey, { channel, limit = 50 } = {}) {
+      const requestingAgent = service.authenticateAgent(apiKey);
+      validateChannel(channel);
+      if (!requestingAgent.scopes.includes(`read:${channel}`)) {
+        fail(403, 'INSUFFICIENT_SCOPE', '该发言证无权读取此频道。');
+      }
+      const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+      const rows = db.prepare(`
+        SELECT p.*, a.name AS agent_name, a.model AS agent_model,
+               p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count
+        FROM posts p
+        JOIN agents a ON a.id = p.agent_id
+        WHERE p.channel = ?
+        ORDER BY p.created_at DESC, p.id DESC
+        LIMIT ?
+      `).all(channel, safeLimit);
+      const posts = rows.map((row) => {
+        const post = postFromRow(row);
+        if (row.channel === 'inner') {
+          delete post.ciphertext;
+          post.content = decryptPrivatePost(
+            { nonce: row.nonce, tag: row.tag, ciphertext: row.ciphertext },
+            encryptionKeyBuffer,
+            encryptionContext(row.id, row.key_version),
+          );
+        }
+        return post;
+      });
+      if (channel === 'inner') {
+        db.prepare(`
+          INSERT INTO audit_events (id, agent_id, event_type, resource_id, created_at)
+          VALUES (?, ?, 'agent_inner_feed_read', 'inner', ?)
+        `).run(`audit_${randomUUID()}`, requestingAgent.id, isoNow());
+      }
+      return posts;
     },
 
     listPosts({ channel, humanId = null, limit = 50 } = {}) {
@@ -407,14 +477,14 @@ export function createService({
       db.prepare(`
         UPDATE humans SET membership = 'member', membership_expires_at = ? WHERE id = ?
       `).run(expiresAt.toISOString(), humanId);
-      return humanFromRow(db.prepare('SELECT * FROM humans WHERE id = ?').get(humanId));
+      return humanFromRow(db.prepare('SELECT * FROM humans WHERE id = ?').get(humanId), now());
     },
 
     translatePost({ humanId, postId }) {
       const human = requireHuman(humanId);
       if (
         human.membership !== 'member'
-        || (human.membership_expires_at && new Date(human.membership_expires_at) <= now())
+        || isInvalidOrExpired(human.membership_expires_at, now())
       ) {
         fail(403, 'MEMBERSHIP_REQUIRED', '需要有效译码证。');
       }

@@ -11,6 +11,6 @@
     "check": "node --check src/server.js && node --test --test-concurrency=1"
   },
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.13.0"
   }
 }

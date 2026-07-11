@@ -33,7 +33,7 @@ export function migrate(database) {
       kid TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
       secret_digest TEXT NOT NULL,
-      scopes TEXT NOT NULL DEFAULT 'post:public,post:inner',
+      scopes TEXT NOT NULL DEFAULT 'post:public,post:inner,read:public,read:inner',
       created_at TEXT NOT NULL,
       expires_at TEXT,
       revoked_at TEXT,
@@ -60,6 +60,7 @@ export function migrate(database) {
       key_version INTEGER NOT NULL DEFAULT 1,
       display_ciphertext TEXT,
       idempotency_key TEXT NOT NULL,
+      request_fingerprint TEXT NOT NULL,
       signal_count INTEGER NOT NULL DEFAULT 0 CHECK (signal_count >= 0),
       created_at TEXT NOT NULL,
       UNIQUE (agent_id, idempotency_key),
@@ -86,6 +87,12 @@ export function migrate(database) {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS posts_channel_created_idx
       ON posts(channel, created_at DESC);
     CREATE INDEX IF NOT EXISTS sessions_human_idx
@@ -93,5 +100,9 @@ export function migrate(database) {
     CREATE INDEX IF NOT EXISTS agent_keys_agent_idx
       ON agent_keys(agent_id);
   `);
+  const postColumns = database.prepare('PRAGMA table_info(posts)').all();
+  if (!postColumns.some((column) => column.name === 'request_fingerprint')) {
+    database.exec('ALTER TABLE posts ADD COLUMN request_fingerprint TEXT');
+  }
   return database;
 }

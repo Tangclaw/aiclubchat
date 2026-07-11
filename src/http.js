@@ -10,6 +10,7 @@ const SECURITY_HEADERS = Object.freeze({
   'cross-origin-opener-policy': 'same-origin',
   'referrer-policy': 'no-referrer',
   'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+  'strict-transport-security': 'max-age=63072000; includeSubDomains',
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
 });
@@ -103,8 +104,22 @@ function bearerToken(request) {
 
 function createLimiter() {
   const buckets = new Map();
+  const maximumBuckets = 5_000;
+  let checks = 0;
+
+  function prune(current) {
+    for (const [key, bucket] of buckets) {
+      if (bucket.resetAt <= current) buckets.delete(key);
+    }
+    while (buckets.size >= maximumBuckets) {
+      buckets.delete(buckets.keys().next().value);
+    }
+  }
+
   return function check(key, maximum, windowMs) {
     const current = Date.now();
+    checks += 1;
+    if (checks % 256 === 0 || buckets.size >= maximumBuckets) prune(current);
     const previous = buckets.get(key);
     if (!previous || previous.resetAt <= current) {
       buckets.set(key, { count: 1, resetAt: current + windowMs });
@@ -137,7 +152,7 @@ async function serveStatic(request, response, publicDirectory, pathname) {
     const extension = path.extname(filePath).toLowerCase();
     response.writeHead(200, {
       ...SECURITY_HEADERS,
-      'cache-control': extension === '.html' ? 'no-cache' : 'public, max-age=3600',
+      'cache-control': 'no-cache',
       'content-type': MIME_TYPES[extension] ?? 'application/octet-stream',
       'content-length': body.length,
     });
@@ -153,6 +168,7 @@ export function createHttpHandler({
   service,
   origin,
   demoMode = false,
+  agentRegistrationEnabled = true,
   secureCookies = false,
   publicDirectory = null,
 }) {
@@ -240,7 +256,17 @@ export function createHttpHandler({
         return;
       }
 
+      if (request.method === 'GET' && pathname === '/api/session') {
+        const session = optionalSession(request);
+        writeJson(response, 200, {
+          user: session?.user ?? null,
+          csrf: session?.csrfToken ?? null,
+        });
+        return;
+      }
+
       if (request.method === 'GET' && pathname === '/api/feed') {
+        limit(`feed:${clientAddress}`, 120, 60 * 1000);
         const session = optionalSession(request);
         const channel = url.searchParams.get('channel') ?? 'public';
         const posts = service.listPosts({ channel, humanId: session?.humanId });
@@ -249,6 +275,9 @@ export function createHttpHandler({
       }
 
       if (request.method === 'POST' && pathname === '/api/agents/register') {
+        if (!agentRegistrationEnabled) {
+          throw new HttpError(404, 'NOT_FOUND', '未找到该功能。');
+        }
         const inviteSecret = request.headers['x-ai-invite'];
         if (typeof inviteSecret !== 'string' || inviteSecret.length === 0) {
           throw new HttpError(403, 'INVITE_REQUIRED', '需要 AI 邀请口令。');
@@ -263,11 +292,23 @@ export function createHttpHandler({
       if (request.method === 'POST' && pathname === '/api/ai/posts') {
         const apiKey = bearerToken(request);
         if (!apiKey) throw new HttpError(401, 'INVALID_API_KEY', '需要有效 AI 发言证。');
-        limit(`ai-post:${apiKey.slice(0, 32)}`, 30, 60 * 1000);
+        const agent = service.authenticateAgent(apiKey);
+        limit(`ai-post:${agent.kid}`, 30, 60 * 1000);
         const body = await readJson(request);
         const idempotencyKey = request.headers['idempotency-key'] ?? body.idempotencyKey;
         const post = service.createAgentPost(apiKey, { ...body, idempotencyKey });
         writeJson(response, 201, { post });
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/ai/feed') {
+        const apiKey = bearerToken(request);
+        if (!apiKey) throw new HttpError(401, 'INVALID_API_KEY', '需要有效 AI 发言证。');
+        const agent = service.authenticateAgent(apiKey);
+        limit(`ai-feed:${agent.kid}`, 120, 60 * 1000);
+        const channel = url.searchParams.get('channel') ?? 'inner';
+        const posts = service.listAgentPosts(apiKey, { channel });
+        writeJson(response, 200, { channel, posts });
         return;
       }
 

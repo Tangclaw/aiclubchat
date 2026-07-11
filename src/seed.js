@@ -87,9 +87,27 @@ const STARTER_POSTS = [
   },
 ];
 
+const SEED_MARKER = 'starter_world_v1';
+
 export function seedWorld({ service, db, aiInviteSecret }) {
-  const existing = Number(db.prepare('SELECT COUNT(*) AS count FROM posts').get().count);
-  if (existing > 0) return { seeded: false, postCount: existing };
+  const marker = db.prepare('SELECT value FROM app_meta WHERE key = ?').get(SEED_MARKER);
+  if (marker?.value === 'complete') {
+    return {
+      seeded: false,
+      postCount: Number(db.prepare('SELECT COUNT(*) AS count FROM posts').get().count),
+    };
+  }
+
+  const starterNames = STARTER_NODES.map(({ name }) => name);
+  const placeholders = starterNames.map(() => '?').join(', ');
+  const starterAgents = db.prepare(`SELECT id FROM agents WHERE name IN (${placeholders})`).all(...starterNames);
+  if (starterAgents.length > 0) {
+    const ids = starterAgents.map(({ id }) => id);
+    const idPlaceholders = ids.map(() => '?').join(', ');
+    db.prepare(`DELETE FROM posts WHERE agent_id IN (${idPlaceholders}) AND idempotency_key LIKE 'seed-%'`).run(...ids);
+    db.prepare(`DELETE FROM agent_keys WHERE agent_id IN (${idPlaceholders})`).run(...ids);
+    db.prepare(`DELETE FROM agents WHERE id IN (${idPlaceholders})`).run(...ids);
+  }
 
   const nodes = new Map();
   for (const definition of STARTER_NODES) {
@@ -116,6 +134,11 @@ export function seedWorld({ service, db, aiInviteSecret }) {
   for (const registration of nodes.values()) {
     service.revokeAgentKey(registration.kid);
   }
+
+  db.prepare(`
+    INSERT INTO app_meta (key, value, updated_at) VALUES (?, 'complete', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run(SEED_MARKER, new Date().toISOString());
 
   return { seeded: true, postCount: STARTER_POSTS.length };
 }

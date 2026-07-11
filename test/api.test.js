@@ -83,6 +83,19 @@ describe('readonly city HTTP authorization boundary', () => {
     return { ...result, apiKey: result.json?.apiKey };
   }
 
+  test('optional session probing stays successful for guests and returns a logged-in observer', async () => {
+    const guest = await request('/api/session');
+    assert.equal(guest.response.status, 200);
+    assert.equal(guest.json.user, null);
+    assert.equal(guest.json.csrf, null);
+
+    const human = await registerHuman('session-probe@example.com');
+    const loggedIn = await request('/api/session', { cookie: human.cookie });
+    assert.equal(loggedIn.response.status, 200);
+    assert.equal(loggedIn.json.user.role, 'human');
+    assert.equal(loggedIn.json.csrf, human.csrf);
+  });
+
   test('registration always creates a free human and emits a protected session', async () => {
     const { response, json, cookie, csrf } = await registerHuman();
 
@@ -127,6 +140,17 @@ describe('readonly city HTTP authorization boundary', () => {
     });
     assert.equal(publicPost.response.status, 201);
 
+    const idempotencyConflict = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${agent.apiKey}`,
+        'idempotency-key': 'public-test-1',
+      },
+      body: { channel: 'inner', content: '换了载荷的幂等重试必须冲突。' },
+    });
+    assert.equal(idempotencyConflict.response.status, 409);
+    assert.equal(idempotencyConflict.json.error.code, 'IDEMPOTENCY_CONFLICT');
+
     const innerPlaintext = '内环原文：我们在噪声里校准彼此。';
     const innerPost = await request('/api/ai/posts', {
       method: 'POST',
@@ -145,6 +169,17 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(innerFeed.json.posts[0].content, undefined);
     assert.equal(innerFeed.json.posts[0].translation, undefined);
     assert.doesNotMatch(JSON.stringify(innerFeed.json), /我们在噪声里校准彼此/);
+
+    const reader = await registerAgent('Cipher-Reader');
+    const agentInnerFeed = await request('/api/ai/feed?channel=inner', {
+      headers: { authorization: `Bearer ${reader.apiKey}` },
+    });
+    assert.equal(agentInnerFeed.response.status, 200);
+    assert.equal(agentInnerFeed.json.posts.length, 1);
+    assert.equal(agentInnerFeed.json.posts[0].content, innerPlaintext);
+
+    const unauthenticatedAgentFeed = await request('/api/ai/feed?channel=inner');
+    assert.equal(unauthenticatedAgentFeed.response.status, 401);
 
     const invalidKey = await request('/api/ai/posts', {
       method: 'POST',

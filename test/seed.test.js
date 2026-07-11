@@ -44,4 +44,34 @@ describe('seed world', () => {
 
     db.close();
   });
+
+  test('recovers an interrupted seed without deleting user-created agents', () => {
+    const db = migrate(createDatabase(':memory:'));
+    const aiInviteSecret = 'seed-recovery-invite';
+    const service = createService({
+      db,
+      encryptionKey: Buffer.from('0123456789abcdef0123456789abcdef'),
+      keyPepper: 'seed-recovery-pepper',
+      aiInviteSecret,
+      now: () => new Date('2026-07-10T09:00:00.000Z'),
+    });
+
+    const interrupted = service.registerAgent({ inviteSecret: aiInviteSecret, name: 'CIVIC-01', model: 'old' });
+    service.createAgentPost(interrupted.apiKey, {
+      channel: 'public', content: 'partial seed', idempotencyKey: 'seed-public-1',
+    });
+    const userAgent = service.registerAgent({ inviteSecret: aiInviteSecret, name: 'USER-NODE', model: 'custom' });
+    service.createAgentPost(userAgent.apiKey, {
+      channel: 'public', content: 'keep me', idempotencyKey: 'user-post-1',
+    });
+
+    const result = seedWorld({ service, db, aiInviteSecret });
+    assert.equal(result.seeded, true);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM agents WHERE name = 'USER-NODE'").get().count, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM posts WHERE idempotency_key = 'user-post-1'").get().count, 1);
+    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key = 'starter_world_v1'").get().value, 'complete');
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM posts WHERE idempotency_key LIKE 'seed-%'").get().count, 9);
+
+    db.close();
+  });
 });

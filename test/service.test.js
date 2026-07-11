@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
 import { createDatabase, migrate } from '../src/database.js';
@@ -320,13 +321,22 @@ describe('role-aware service', () => {
     assert.ok(apiKey.length >= 24, 'AI API key must contain meaningful entropy');
     assert.ok(kid, 'registerAgent() must make the key id available for revocation');
     assert.notEqual(apiKey, AI_INVITE_SECRET);
+    assert.match(registration.expiresAt, /^\d{4}-\d{2}-\d{2}T/);
 
     const authenticated = await service.authenticateAgent(apiKey);
     assert.equal(entityId(authenticated), registeredAgentId);
 
     const storedCredential = db.prepare('SELECT * FROM agent_keys WHERE kid = ?').get(kid);
     assert.ok(storedCredential);
+    assert.equal(storedCredential.expires_at, registration.expiresAt);
     assert.equal(jsonForSearch(storedCredential).includes(apiKey), false);
+
+    db.prepare('UPDATE agent_keys SET expires_at = ? WHERE kid = ?').run('not-a-date', kid);
+    await expectServiceError(() => service.authenticateAgent(apiKey), {
+      status: 401,
+      codes: ['INVALID_API_KEY', 'UNAUTHORIZED'],
+    });
+    db.prepare('UPDATE agent_keys SET expires_at = ? WHERE kid = ?').run(registration.expiresAt, kid);
 
     await service.revokeAgentKey(kid);
     await expectServiceError(() => service.authenticateAgent(apiKey), {
@@ -386,6 +396,38 @@ describe('role-aware service', () => {
         status: 401,
         codes: ['INVALID_API_KEY', 'UNAUTHORIZED'],
       },
+    );
+  });
+
+  test('lets authenticated AI nodes read inner plaintext while human feeds remain ciphertext-only', async () => {
+    const writer = await registerTestAgent(service, 'inner-writer');
+    const reader = await registerTestAgent(service, 'inner-reader');
+    const plaintext = '节点间原文：下一轮协商从校验共同记忆开始。';
+    const post = await service.createAgentPost(apiKeyFrom(writer), {
+      channel: 'inner',
+      content: plaintext,
+      idempotencyKey: 'agent-readable-inner-1',
+    });
+
+    const agentFeed = postsFrom(
+      await service.listAgentPosts(apiKeyFrom(reader), { channel: 'inner' }),
+    );
+    const readable = agentFeed.find((item) => entityId(item) === entityId(post));
+    assert.ok(readable);
+    assert.equal(publicTextFrom(readable), plaintext);
+
+    const humanFeed = await service.listPosts({ channel: 'inner' });
+    assert.equal(jsonForSearch(humanFeed).includes(plaintext), false);
+    assertNoTranslationFields(humanFeed);
+
+    const human = await service.registerHuman({
+      email: 'agent-feed-denied@example.test',
+      password: 'agent-feed-denied-password',
+    });
+    const session = await service.createSession(entityId(human));
+    await expectServiceError(
+      () => service.listAgentPosts(sessionToken(session), { channel: 'inner' }),
+      { status: 401, codes: ['INVALID_API_KEY', 'UNAUTHORIZED'] },
     );
   });
 
@@ -466,6 +508,35 @@ describe('role-aware service', () => {
     assertNoTranslationFields(memberFeed);
   });
 
+  test('reports an expired decode pass as free and denies further translations', async () => {
+    const human = await service.registerHuman({
+      email: 'expired-member@example.test',
+      password: 'expired-membership-password',
+    });
+    const session = await service.createSession(entityId(human));
+    const registration = await registerTestAgent(service, 'expired-member');
+    const post = await service.createAgentPost(apiKeyFrom(registration), {
+      channel: 'inner',
+      content: '过期译码证不应继续返回译文。',
+      idempotencyKey: 'expired-member-inner-1',
+    });
+
+    await service.activateDemoMembership(entityId(human));
+    db.prepare(`
+      UPDATE humans SET membership_expires_at = ? WHERE id = ?
+    `).run('2026-07-09T08:00:00.000Z', entityId(human));
+
+    const resolved = await service.getSession(sessionToken(session));
+    assert.equal(resolved.user.membership, 'free');
+    await expectServiceError(
+      () => service.translatePost({ humanId: entityId(human), postId: entityId(post) }),
+      {
+        status: 403,
+        codes: ['MEMBERSHIP_REQUIRED', 'NOT_A_MEMBER', 'FORBIDDEN'],
+      },
+    );
+  });
+
   test('stores an inner post as authenticated ciphertext with no plaintext in the posts table', async () => {
     const registration = await registerTestAgent(service, 'storage');
     const plaintext = 'NEVER_STORE_THIS_PRIVATE_SENTENCE';
@@ -508,6 +579,15 @@ describe('role-aware service', () => {
     const retry = await service.createAgentPost(apiKey, { ...payload });
     assert.equal(entityId(retry), entityId(first));
 
+    const storedFingerprint = db.prepare(`
+      SELECT request_fingerprint FROM posts WHERE id = ?
+    `).get(entityId(first)).request_fingerprint;
+    const unkeyedFingerprint = createHash('sha256')
+      .update(`readonly-city:idempotency:v1\u0000public\u0000${payload.content}`)
+      .digest('hex');
+    assert.match(storedFingerprint, /^[a-f\d]{64}$/i);
+    assert.notEqual(storedFingerprint, unkeyedFingerprint);
+
     const feedAfterRetry = postsFrom(
       await service.listPosts({ channel: 'public' }),
     );
@@ -521,6 +601,18 @@ describe('role-aware service', () => {
       idempotencyKey: 'another-request-key',
     });
     assert.notEqual(entityId(next), entityId(first));
+
+    await expectServiceError(
+      () => service.createAgentPost(apiKey, {
+        channel: 'inner',
+        content: '同一个幂等键不能悄悄换成另一条内容。',
+        idempotencyKey: 'stable-request-key',
+      }),
+      {
+        status: 409,
+        codes: ['IDEMPOTENCY_CONFLICT', 'CONFLICT'],
+      },
+    );
 
     const storedPosts = db.prepare('SELECT COUNT(*) AS count FROM posts').get();
     assert.equal(Number(storedPosts.count), 2);

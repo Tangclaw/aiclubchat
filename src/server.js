@@ -40,6 +40,7 @@ export function createReadonlyCityServer({
   aiInviteSecret,
   origin,
   demoMode = false,
+  agentRegistrationEnabled = true,
   secureCookies = false,
   publicDirectory = path.join(PROJECT_DIRECTORY, 'public'),
   seed = true,
@@ -61,6 +62,7 @@ export function createReadonlyCityServer({
     service,
     origin,
     demoMode,
+    agentRegistrationEnabled,
     secureCookies,
     publicDirectory,
   }));
@@ -71,29 +73,45 @@ export function createReadonlyCityServer({
 }
 
 function startFromEnvironment() {
+  const production = process.env.NODE_ENV === 'production';
   const port = Number(process.env.PORT ?? 4173);
+  const host = process.env.HOST ?? '127.0.0.1';
   const dataDirectory = path.resolve(process.env.DATA_DIR ?? path.join(PROJECT_DIRECTORY, 'data'));
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
-  const encryptionKey = process.env.MESSAGE_ENCRYPTION_KEY
-    ?? loadOrCreateSecret(path.join(dataDirectory, '.master-key'));
-  const keyPepper = process.env.AI_KEY_PEPPER
-    ?? loadOrCreateSecret(path.join(dataDirectory, '.key-pepper'));
-  const aiInviteSecret = process.env.AI_INVITE_SECRET
-    ?? loadOrCreateSecret(path.join(dataDirectory, '.ai-invite'), 24);
-  const origin = process.env.APP_ORIGIN ?? `http://localhost:${port}`;
+  if (production && process.env.DEMO_MODE === 'true') {
+    throw new Error('DEMO_MODE cannot be enabled in production');
+  }
+  const requiredProductionSecret = (name, localFile, bytes = 32) => {
+    const configured = process.env[name];
+    if (configured) return configured;
+    if (production) throw new Error(`${name} must be explicitly configured in production`);
+    return loadOrCreateSecret(path.join(dataDirectory, localFile), bytes);
+  };
+  const encryptionKey = requiredProductionSecret('MESSAGE_ENCRYPTION_KEY', '.master-key');
+  const keyPepper = requiredProductionSecret('AI_KEY_PEPPER', '.key-pepper');
+  const aiInviteSecret = requiredProductionSecret('AI_INVITE_SECRET', '.ai-invite', 24);
+  const origin = process.env.APP_ORIGIN ?? (production ? null : `http://localhost:${port}`);
+  if (!origin || (production && !origin.startsWith('https://'))) {
+    throw new Error('APP_ORIGIN must be an explicit HTTPS origin in production');
+  }
   const server = createReadonlyCityServer({
     dbPath: path.join(dataDirectory, 'readonly-city.db'),
     encryptionKey,
     keyPepper,
     aiInviteSecret,
     origin,
-    demoMode: process.env.DEMO_MODE !== 'false',
-    secureCookies: process.env.NODE_ENV === 'production',
-    seed: true,
+    demoMode: !production && process.env.DEMO_MODE !== 'false',
+    agentRegistrationEnabled: production
+      ? process.env.AI_REGISTRATION_ENABLED === 'true'
+      : process.env.AI_REGISTRATION_ENABLED !== 'false',
+    secureCookies: production,
+    seed: !production && process.env.SEED_DEMO !== 'false',
   });
-  server.listen(port, () => {
-    console.log(`READONLY.CITY listening on ${origin}`);
-    console.log(`Local AI invite is stored at ${path.join(dataDirectory, '.ai-invite')}`);
+  server.listen(port, host, () => {
+    console.log(`READONLY.CITY listening on ${origin} via ${host}:${port}`);
+    if (!production) {
+      console.log(`Local AI invite is stored at ${path.join(dataDirectory, '.ai-invite')}`);
+    }
   });
 }
 
