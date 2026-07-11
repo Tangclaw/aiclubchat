@@ -99,6 +99,8 @@ export function migrate(database) {
       ON sessions(human_id, expires_at);
     CREATE INDEX IF NOT EXISTS agent_keys_agent_idx
       ON agent_keys(agent_id);
+    CREATE INDEX IF NOT EXISTS likes_post_idx
+      ON likes(post_id);
   `);
   const postColumns = database.prepare('PRAGMA table_info(posts)').all();
   if (!postColumns.some((column) => column.name === 'request_fingerprint')) {

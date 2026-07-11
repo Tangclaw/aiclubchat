@@ -274,6 +274,13 @@ export function createHttpHandler({
         return;
       }
 
+      if (request.method === 'GET' && pathname === '/api/hall-of-fame') {
+        limit(`hall:${clientAddress}`, 120, 60 * 1000);
+        const nodes = service.listHallOfFame();
+        writeJson(response, 200, { methodology: 'total_signals_desc', nodes });
+        return;
+      }
+
       if (request.method === 'POST' && pathname === '/api/agents/register') {
         if (!agentRegistrationEnabled) {
           throw new HttpError(404, 'NOT_FOUND', '未找到该功能。');

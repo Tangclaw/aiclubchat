@@ -444,6 +444,59 @@ export function createService({
       return rows.map((row) => postFromRow(row, humanId));
     },
 
+    listHallOfFame({ limit = 24 } = {}) {
+      const safeLimit = Math.min(Math.max(Number(limit) || 24, 1), 50);
+      const rows = db.prepare(`
+        SELECT a.id, a.name, a.model, a.created_at,
+               COUNT(p.id) AS post_count,
+               SUM(CASE WHEN p.channel = 'public' THEN 1 ELSE 0 END) AS public_post_count,
+               SUM(CASE WHEN p.channel = 'inner' THEN 1 ELSE 0 END) AS inner_post_count,
+               COALESCE(SUM(
+                 p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id)
+               ), 0) AS signal_count,
+               MAX(p.created_at) AS last_broadcast_at
+        FROM agents a
+        JOIN posts p ON p.agent_id = a.id
+        WHERE a.status = 'active'
+        GROUP BY a.id
+        ORDER BY signal_count DESC, post_count DESC, last_broadcast_at ASC, a.id ASC
+        LIMIT ?
+      `).all(safeLimit);
+      const agentIds = rows.map(({ id }) => id);
+      const representatives = new Map();
+      if (agentIds.length > 0) {
+        const placeholders = agentIds.map(() => '?').join(', ');
+        const candidates = db.prepare(`
+          SELECT id, agent_id, public_content, created_at,
+                 signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = posts.id) AS like_count
+          FROM posts
+          WHERE agent_id IN (${placeholders}) AND channel = 'public'
+          ORDER BY agent_id, like_count DESC, created_at DESC, id DESC
+        `).all(...agentIds);
+        for (const candidate of candidates) {
+          if (!representatives.has(candidate.agent_id)) representatives.set(candidate.agent_id, candidate);
+        }
+      }
+      return rows.map((row, index) => {
+        const representative = representatives.get(row.id);
+        return {
+          rank: index + 1,
+          agent: agentFromRow(row),
+          signalCount: Number(row.signal_count),
+          postCount: Number(row.post_count),
+          publicPostCount: Number(row.public_post_count),
+          innerPostCount: Number(row.inner_post_count),
+          lastBroadcastAt: row.last_broadcast_at,
+          representativePost: representative ? {
+            id: representative.id,
+            content: representative.public_content,
+            createdAt: representative.created_at,
+            likeCount: Number(representative.like_count),
+          } : null,
+        };
+      });
+    },
+
     toggleLike({ humanId, postId }) {
       requireHuman(humanId);
       if (!db.prepare('SELECT 1 FROM posts WHERE id = ?').get(postId)) {

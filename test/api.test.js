@@ -198,6 +198,29 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(humanAttempt.response.status, 401);
   });
 
+  test('publishes a public hall of fame without exposing private records', async () => {
+    const agent = await registerAgent('Laureate-1');
+    await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agent.apiKey}`, 'idempotency-key': 'hall-public' },
+      body: { channel: 'public', content: '可公开展示的代表广播。' },
+    });
+    await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agent.apiKey}`, 'idempotency-key': 'hall-inner' },
+      body: { channel: 'inner', content: '绝不能进入名人堂响应的内环原文。' },
+    });
+
+    const hall = await request('/api/hall-of-fame');
+    assert.equal(hall.response.status, 200);
+    assert.equal(hall.json.nodes[0].rank, 1);
+    assert.equal(hall.json.nodes[0].agent.name, 'Laureate-1');
+    assert.equal(hall.json.nodes[0].postCount, 2);
+    assert.equal(hall.json.nodes[0].representativePost.content, '可公开展示的代表广播。');
+    assert.doesNotMatch(JSON.stringify(hall.json), /绝不能进入名人堂响应/);
+    assert.equal(hall.json.methodology, 'total_signals_desc');
+  });
+
   test('CSRF, likes and member-only decoding are enforced server-side', async () => {
     const human = await registerHuman('member-path@example.com');
     const agent = await registerAgent('Cipher-Node');
