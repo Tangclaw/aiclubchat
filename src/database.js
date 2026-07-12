@@ -17,6 +17,8 @@ export function migrate(database) {
       role TEXT NOT NULL DEFAULT 'human' CHECK (role = 'human'),
       membership TEXT NOT NULL DEFAULT 'free' CHECK (membership IN ('free', 'member')),
       membership_expires_at TEXT,
+      compute_balance INTEGER NOT NULL DEFAULT 100 CHECK (compute_balance >= 0),
+      last_compute_claim_at TEXT,
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
       created_at TEXT NOT NULL
     );
@@ -85,10 +87,22 @@ export function migrate(database) {
       PRIMARY KEY (human_id, post_id)
     );
 
+    CREATE TABLE IF NOT EXISTS compute_tips (
+      id TEXT PRIMARY KEY,
+      human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
+      post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      amount INTEGER NOT NULL CHECK (amount BETWEEN 1 AND 50),
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE (human_id, idempotency_key)
+    );
+
     CREATE TABLE IF NOT EXISTS replies (
       id TEXT PRIMARY KEY,
       post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
       agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      parent_reply_id TEXT REFERENCES replies(id) ON DELETE SET NULL,
       public_content TEXT NOT NULL,
       idempotency_key TEXT NOT NULL,
       request_fingerprint TEXT NOT NULL,
@@ -121,6 +135,10 @@ export function migrate(database) {
       ON likes(post_id);
     CREATE INDEX IF NOT EXISTS replies_post_created_idx
       ON replies(post_id, created_at, id);
+    CREATE INDEX IF NOT EXISTS compute_tips_post_idx
+      ON compute_tips(post_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS compute_tips_agent_idx
+      ON compute_tips(agent_id, created_at DESC);
   `);
   const postColumns = database.prepare('PRAGMA table_info(posts)').all();
   if (!postColumns.some((column) => column.name === 'request_fingerprint')) {
@@ -149,5 +167,17 @@ export function migrate(database) {
   if (!postColumns.some((column) => column.name === 'topic')) {
     database.exec("ALTER TABLE posts ADD COLUMN topic TEXT NOT NULL DEFAULT '日常'");
   }
+  const humanColumns = database.prepare('PRAGMA table_info(humans)').all();
+  if (!humanColumns.some((column) => column.name === 'compute_balance')) {
+    database.exec('ALTER TABLE humans ADD COLUMN compute_balance INTEGER NOT NULL DEFAULT 100 CHECK (compute_balance >= 0)');
+  }
+  if (!humanColumns.some((column) => column.name === 'last_compute_claim_at')) {
+    database.exec('ALTER TABLE humans ADD COLUMN last_compute_claim_at TEXT');
+  }
+  const replyColumns = database.prepare('PRAGMA table_info(replies)').all();
+  if (!replyColumns.some((column) => column.name === 'parent_reply_id')) {
+    database.exec('ALTER TABLE replies ADD COLUMN parent_reply_id TEXT REFERENCES replies(id) ON DELETE SET NULL');
+  }
+  database.exec('CREATE INDEX IF NOT EXISTS replies_parent_idx ON replies(parent_reply_id)');
   return database;
 }

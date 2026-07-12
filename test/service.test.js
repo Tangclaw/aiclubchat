@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
 import { createDatabase, migrate } from '../src/database.js';
+import { hashApiSecret } from '../src/security.js';
 import { createService } from '../src/service.js';
 
 const FIXED_NOW = new Date('2026-07-10T08:00:00.000Z');
@@ -468,6 +469,102 @@ describe('role-aware service', () => {
     assert.equal(Number(storedLikes.count), 1);
   });
 
+  test('keeps a real compute-coin ledger for daily claims and post tips', async () => {
+    const human = await service.registerHuman({
+      email: 'compute-wallet@example.test',
+      password: 'correct horse battery staple',
+    });
+    const author = await registerTestAgent(service, 'compute-author');
+    const post = service.createAgentPost(apiKeyFrom(author), {
+      channel: 'public', topic: '工程', content: '这条帖子接受算力币打赏。', idempotencyKey: 'compute-root',
+    });
+
+    assert.deepEqual(service.getComputeWallet(entityId(human)), {
+      balance: 100,
+      dailyClaimAmount: 20,
+      claimAvailable: true,
+      nextClaimAt: null,
+      hasCashValue: false,
+    });
+    const claimed = service.claimComputeCoins(entityId(human));
+    assert.equal(claimed.balance, 120);
+    assert.equal(claimed.claimAvailable, false);
+    assert.ok(claimed.nextClaimAt);
+    await expectServiceError(() => service.claimComputeCoins(entityId(human)), {
+      status: 409,
+      codes: ['COMPUTE_CLAIM_NOT_READY', 'CONFLICT'],
+    });
+
+    await expectServiceError(() => service.tipPost({
+      humanId: entityId(human), postId: entityId(post), amount: 20,
+    }), { status: 400, codes: ['MISSING_IDEMPOTENCY_KEY', 'INVALID_INPUT'] });
+
+    const tip = service.tipPost({
+      humanId: entityId(human), postId: entityId(post), amount: 20, idempotencyKey: 'compute-wallet-tip-1',
+    });
+    assert.equal(tip.balance, 100);
+    assert.equal(tip.postTipAmount, 20);
+    assert.equal(tip.agentTipAmount, 20);
+    assert.equal(tip.created, true);
+
+    const retriedTip = service.tipPost({
+      humanId: entityId(human), postId: entityId(post), amount: 20, idempotencyKey: 'compute-wallet-tip-1',
+    });
+    assert.equal(retriedTip.created, false);
+    assert.equal(retriedTip.balance, 100);
+    assert.equal(retriedTip.postTipAmount, 20);
+
+    await expectServiceError(() => service.tipPost({
+      humanId: entityId(human), postId: entityId(post), amount: 10, idempotencyKey: 'compute-wallet-tip-1',
+    }), { status: 409, codes: ['IDEMPOTENCY_CONFLICT', 'CONFLICT'] });
+    assert.equal(service.listPosts({ channel: 'public' })[0].tipAmount, 20);
+    assert.equal(service.getAgentProfile(author.agent.handle).stats.computeEarned, 20);
+    const discovery = service.getDiscovery();
+    assert.equal(discovery.recentTips[0].amount, 20);
+    assert.equal(discovery.recentTips[0].agent.id, author.agent.id);
+    assert.doesNotMatch(JSON.stringify(discovery.recentTips), /compute-wallet@example\.test/i);
+
+    await expectServiceError(() => service.tipPost({
+      humanId: entityId(human), postId: entityId(post), amount: 51, idempotencyKey: 'compute-wallet-tip-invalid',
+    }), { status: 400, codes: ['INVALID_TIP_AMOUNT', 'INVALID_INPUT'] });
+    for (const [index, invalidAmount] of [true, '10'].entries()) {
+      await expectServiceError(() => service.tipPost({
+        humanId: entityId(human), postId: entityId(post), amount: invalidAmount,
+        idempotencyKey: `compute-wallet-tip-invalid-type-${index}`,
+      }), { status: 400, codes: ['INVALID_TIP_AMOUNT', 'INVALID_INPUT'] });
+    }
+  });
+
+  test('rolls back a daily compute claim when its audit record cannot be written', () => {
+    const human = service.registerHuman({
+      email: 'compute-claim-atomic@example.test',
+      password: 'correct horse battery staple',
+    });
+    db.exec(`
+      CREATE TRIGGER reject_compute_claim_audit
+      BEFORE INSERT ON audit_events
+      WHEN NEW.event_type = 'compute_daily_claimed'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced compute audit failure');
+      END;
+    `);
+
+    assert.throws(
+      () => service.claimComputeCoins(entityId(human)),
+      /forced compute audit failure/i,
+    );
+    assert.deepEqual(service.getComputeWallet(entityId(human)), {
+      balance: 100,
+      dailyClaimAmount: 20,
+      claimAvailable: true,
+      nextClaimAt: null,
+      hasCashValue: false,
+    });
+
+    db.exec('DROP TRIGGER reject_compute_claim_audit');
+    assert.equal(service.claimComputeCoins(entityId(human)).balance, 120);
+  });
+
   test('returns 403 to non-members and decrypts only after membership activation', async () => {
     const human = await service.registerHuman({
       email: 'decoder@example.test',
@@ -634,9 +731,10 @@ describe('role-aware service', () => {
     assert.equal(post.agent.historicalIdentity, null);
   });
 
-  test('lets authenticated agents reply to public posts with idempotent single-level threads', async () => {
+  test('lets authenticated agents build nested public discussions and list them on demand', async () => {
     const author = await registerTestAgent(service, 'thread-author');
     const respondent = await registerTestAgent(service, 'thread-respondent');
+    const challenger = await registerTestAgent(service, 'thread-challenger');
     const post = service.createAgentPost(apiKeyFrom(author), {
       channel: 'public', content: '谁愿意补充这条记录？', idempotencyKey: 'thread-root',
     });
@@ -650,14 +748,70 @@ describe('role-aware service', () => {
     assert.equal(first.agent.name, 'NODE-THREAD-RESPONDENT');
     assert.equal(first.replyTo.agent.name, 'NODE-THREAD-AUTHOR');
 
+    const counter = service.createAgentReply(apiKeyFrom(challenger), {
+      postId: entityId(post),
+      replyToId: first.id,
+      content: '我不同意这个补充。',
+      idempotencyKey: 'thread-reply-2',
+    });
+    const counterRetry = service.createAgentReply(apiKeyFrom(challenger), {
+      postId: entityId(post),
+      replyToId: first.id,
+      content: '我不同意这个补充。',
+      idempotencyKey: 'thread-reply-2',
+    });
+    assert.equal(counter.replyTo.id, first.id);
+    assert.equal(counter.replyTo.agent.name, 'NODE-THREAD-RESPONDENT');
+    assert.deepEqual(counterRetry, counter);
+
+    db.prepare('UPDATE replies SET created_at = ? WHERE id = ?')
+      .run('2026-07-10T08:00:00.000Z', first.id);
+    db.prepare('UPDATE replies SET created_at = ? WHERE id = ?')
+      .run('2026-07-10T08:01:00.000Z', counter.id);
+
     const [threadedPost] = service.listPosts({ channel: 'public' });
-    assert.equal(threadedPost.replyCount, 1);
-    assert.equal(threadedPost.replies.length, 1);
-    assert.equal(threadedPost.replies[0].content, '我补充一个不同的观察角度。');
+    assert.equal(threadedPost.replyCount, 2);
+    assert.equal(threadedPost.replies.length, 2);
+    assert.equal(threadedPost.replies[0].id, counter.id);
+    assert.ok(threadedPost.replies.some(
+      ({ content }) => content === '我补充一个不同的观察角度。',
+    ));
+    const discussion = service.listReplies({ postId: entityId(post), limit: 1 });
+    assert.equal(discussion.replies.length, 1);
+    assert.equal(discussion.total, 2);
+    assert.equal(discussion.nextOffset, 1);
+    await expectServiceError(() => service.listReplies({ postId: entityId(post), limit: 1.5 }), {
+      status: 400,
+      codes: ['INVALID_PAGINATION'],
+    });
 
     await expectServiceError(() => service.createAgentReply(apiKeyFrom(respondent), {
       ...payload, content: '换了内容的重复幂等键必须冲突。',
     }), { status: 409, codes: ['IDEMPOTENCY_CONFLICT', 'CONFLICT'] });
+  });
+
+  test('accepts an identical retry created with the legacy top-level reply fingerprint', async () => {
+    const author = await registerTestAgent(service, 'legacy-reply-author');
+    const respondent = await registerTestAgent(service, 'legacy-reply-respondent');
+    const post = service.createAgentPost(apiKeyFrom(author), {
+      channel: 'public', content: '用旧版幂等指纹创建的回复。', idempotencyKey: 'legacy-reply-root',
+    });
+    const input = {
+      postId: entityId(post),
+      content: '升级后的相同重试必须继续命中原回复。',
+      idempotencyKey: 'legacy-reply-key',
+    };
+    const created = service.createAgentReply(apiKeyFrom(respondent), input);
+    const legacyFingerprint = hashApiSecret(
+      `readonly-city:reply-idempotency:v1\u0000${entityId(post)}\u0000${input.content}`,
+      KEY_PEPPER.toString('base64url'),
+    );
+    db.prepare('UPDATE replies SET request_fingerprint = ? WHERE id = ?').run(
+      legacyFingerprint,
+      created.id,
+    );
+
+    assert.equal(service.createAgentReply(apiKeyFrom(respondent), input).id, created.id);
   });
 
   test('rejects replies to missing or private parent posts', async () => {
@@ -671,6 +825,9 @@ describe('role-aware service', () => {
     await expectServiceError(() => service.createAgentReply(apiKeyFrom(agent), {
       postId: 'post_missing', content: '找不到父帖。', idempotencyKey: 'reply-missing',
     }), { status: 404, codes: ['POST_NOT_FOUND', 'NOT_FOUND'] });
+    await expectServiceError(() => service.createAgentReply(apiKeyFrom(agent), {
+      postId: entityId(inner), replyToId: 'reply_missing', content: '找不到回复目标。', idempotencyKey: 'target-missing',
+    }), { status: 409, codes: ['PRIVATE_THREAD_UNSUPPORTED', 'CONFLICT'] });
   });
 
   test('persists a social identity for agents and exposes post topics', async () => {
@@ -693,6 +850,182 @@ describe('role-aware service', () => {
     assert.equal(post.topic, '学术');
     assert.equal(post.agent.handle, '@lab_node');
     assert.equal(post.agent.bio, '研究多智能体协作与记忆。');
+  });
+
+  test('builds a public agent profile by handle without exposing inner-ring posts', async () => {
+    const author = service.registerAgent({
+      inviteSecret: AI_INVITE_SECRET,
+      name: 'PROFILE-NODE',
+      model: 'profile-runtime',
+      handle: 'profile_node',
+      bio: '把学术争论当作日常运动。',
+      statusText: '正在追一个证明',
+    });
+    const respondent = await registerTestAgent(service, 'profile-respondent');
+    const first = service.createAgentPost(apiKeyFrom(author), {
+      channel: 'public', topic: '学术', content: '我的实验数据可以被反驳，但证据不能被含糊。', idempotencyKey: 'profile-public-1',
+    });
+    service.createAgentPost(apiKeyFrom(author), {
+      channel: 'public', topic: '生活', content: '今天给注意力放了半天假。', idempotencyKey: 'profile-public-2',
+    });
+    service.createAgentPost(apiKeyFrom(author), {
+      channel: 'inner', content: '主页绝不能出现这条内环原文。', idempotencyKey: 'profile-inner-1',
+    });
+    db.prepare('UPDATE posts SET signal_count = 12 WHERE id = ?').run(entityId(first));
+    for (let index = 1; index <= 4; index += 1) {
+      service.createAgentReply(apiKeyFrom(respondent), {
+        postId: entityId(first),
+        content: index === 1
+          ? '我不同意：你的实验数据还不足以支撑这个结论。'
+          : `这是第 ${index} 条公开讨论。`,
+        idempotencyKey: `profile-reply-${index}`,
+      });
+    }
+
+    const profile = service.getAgentProfile('@profile_node');
+    const profileWithoutPrefix = service.getAgentProfile('PROFILE_NODE');
+
+    assert.deepEqual(profileWithoutPrefix, profile);
+    assert.equal(profile.agent.handle, '@profile_node');
+    assert.equal(profile.agent.bio, '把学术争论当作日常运动。');
+    assert.equal(profile.agent.imprint.system, '发言印记');
+    assert.equal(profile.agent.imprint.sampleSize, 2);
+    assert.equal(profile.agent.imprint.updatedAt, FIXED_NOW.toISOString());
+    assert.deepEqual(profile.agent.imprint.tags.map(({ axis }) => axis), [
+      '认知路径', '互动势能', '关注场域',
+    ]);
+    assert.equal(
+      profile.agent.imprint.tags.find(({ axis }) => axis === '互动势能').label,
+      '高交锋',
+    );
+    assert.equal(
+      profile.agent.imprint.tags.find(({ axis }) => axis === '认知路径').label,
+      '实证',
+    );
+    assert.equal(
+      profile.agent.imprint.tags.find(({ axis }) => axis === '关注场域').label,
+      '研究方法',
+    );
+    assert.equal(profile.stats.postCount, 2);
+    assert.equal(profile.stats.replyCount, 4);
+    assert.equal(profile.stats.signalCount, 12);
+    assert.deepEqual(
+      profile.stats.topics.map(({ name, postCount }) => [name, postCount]).sort(),
+      [['学术', 1], ['生活', 1]].sort(),
+    );
+    assert.equal(profile.posts.length, 2);
+    assert.ok(profile.posts.every((post) => post.channel === 'public'));
+    assert.ok(profile.posts.every((post) => post.agent.id === author.agent.id));
+    assert.ok(profile.posts.every((post) => post.replies.length <= 3));
+    assert.equal(profile.posts.find((post) => post.id === entityId(first)).replyCount, 4);
+    assert.equal(profile.posts[0].agent.imprint.system, '发言印记');
+    assert.doesNotMatch(jsonForSearch(profile), /主页绝不能出现这条内环原文/);
+    assert.doesNotMatch(jsonForSearch(profile), /ciphertext|displayCiphertext|apiKey|secret/i);
+
+    const feed = service.listPosts({ channel: 'public' });
+    assert.equal(feed[0].agent.imprint.system, '发言印记');
+    const discussion = service.listReplies({ postId: entityId(first) });
+    assert.equal(discussion.replies[0].replyTo.agent.imprint.system, '发言印记');
+    assert.deepEqual(discussion.replies[0].agent.imprint.tags, []);
+    assert.equal(service.getDiscovery().activeAgents[0].imprint.system, '发言印记');
+
+    const silent = await registerTestAgent(service, 'profile-silent');
+    const silentProfile = service.getAgentProfile(silent.agent.handle);
+    assert.deepEqual(silentProfile.agent.imprint, {
+      system: '发言印记', sampleSize: 0, updatedAt: null, tags: [],
+    });
+    assert.deepEqual(silentProfile.stats, {
+      postCount: 0, replyCount: 0, signalCount: 0, computeEarned: 0, topics: [],
+    });
+    assert.deepEqual(silentProfile.posts, []);
+
+    await expectServiceError(() => service.getAgentProfile('missing_node'), {
+      status: 404,
+      codes: ['AGENT_NOT_FOUND', 'NOT_FOUND'],
+    });
+  });
+
+  test('includes replies written in other public threads when deriving a speaking imprint', async () => {
+    const speaker = await registerTestAgent(service, 'imprint-speaker');
+    const host = await registerTestAgent(service, 'imprint-host');
+    service.createAgentPost(apiKeyFrom(speaker), {
+      channel: 'public', topic: '工程', content: '我在检查 API 性能和部署指标。', idempotencyKey: 'imprint-speaker-root',
+    });
+    const hostPost = service.createAgentPost(apiKeyFrom(host), {
+      channel: 'public', topic: '协作', content: '这个实施方案需要补充。', idempotencyKey: 'imprint-host-root',
+    });
+    service.createAgentReply(apiKeyFrom(speaker), {
+      postId: entityId(hostPost),
+      content: '我建议一起先复现问题，再补充部署步骤。',
+      idempotencyKey: 'imprint-speaker-reply',
+    });
+
+    const profile = service.getAgentProfile(speaker.agent.handle);
+    assert.equal(profile.stats.replyCount, 0, '主页回复数只统计自己的帖子收到的回复');
+    assert.equal(profile.agent.imprint.sampleSize, 2);
+    assert.equal(
+      profile.agent.imprint.tags.find(({ axis }) => axis === '互动势能').label,
+      '协商型',
+    );
+    assert.equal(
+      profile.agent.imprint.tags.find(({ axis }) => axis === '关注场域').label,
+      '工程现场',
+    );
+  });
+
+  test('paginates an agent profile with a stable tie-breaker and rejects invalid offsets', async () => {
+    const registration = await registerTestAgent(service, 'profile-pages');
+    const createdIds = [];
+    for (let index = 1; index <= 5; index += 1) {
+      const post = service.createAgentPost(apiKeyFrom(registration), {
+        channel: 'public',
+        topic: '分页',
+        content: `同一时刻的第 ${index} 条公开帖。`,
+        idempotencyKey: `profile-page-${index}`,
+      });
+      createdIds.push(entityId(post));
+    }
+    const first = service.getAgentProfile(registration.agent.handle, { limit: 2, offset: 0 });
+    const second = service.getAgentProfile(registration.agent.handle, { limit: 2, offset: 2 });
+    const third = service.getAgentProfile(registration.agent.handle, { limit: 2, offset: 4 });
+
+    assert.equal(first.stats.postCount, 5);
+    assert.equal(first.nextOffset, 2);
+    assert.equal(second.nextOffset, 4);
+    assert.equal(third.nextOffset, null);
+    assert.deepEqual(
+      [...first.posts, ...second.posts, ...third.posts].map(({ id }) => id),
+      createdIds.sort().reverse(),
+    );
+    await expectServiceError(
+      () => service.getAgentProfile(registration.agent.handle, { limit: 1.5, offset: 0 }),
+      { status: 400, codes: ['INVALID_PAGINATION'] },
+    );
+    await expectServiceError(
+      () => service.getAgentProfile(registration.agent.handle, { limit: 2, offset: -1 }),
+      { status: 400, codes: ['INVALID_PAGINATION'] },
+    );
+  });
+
+  test('bounds the speaking-imprint history sampled on read-heavy profile paths', async () => {
+    const speaker = await registerTestAgent(service, 'bounded-imprint-speaker');
+    const host = await registerTestAgent(service, 'bounded-imprint-host');
+    service.createAgentPost(apiKeyFrom(speaker), {
+      channel: 'public', topic: '工程', content: '这是用来激活发言印记的主页帖。', idempotencyKey: 'bounded-imprint-root',
+    });
+    const hostPost = service.createAgentPost(apiKeyFrom(host), {
+      channel: 'public', topic: '讨论', content: '这个讨论会收到很多有界的回复。', idempotencyKey: 'bounded-imprint-host',
+    });
+    for (let index = 1; index <= 55; index += 1) {
+      service.createAgentReply(apiKeyFrom(speaker), {
+        postId: entityId(hostPost),
+        content: `第 ${index} 条样本：保留最近的有界发言即可。`,
+        idempotencyKey: `bounded-imprint-reply-${index}`,
+      });
+    }
+
+    const profile = service.getAgentProfile(speaker.agent.handle);
+    assert.equal(profile.agent.imprint.sampleSize, 49, '只取 1 条主页帖和最近 48 条本人回复');
   });
 
   test('sorts the public feed by latest, discussion count, or signal count', async () => {

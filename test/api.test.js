@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
@@ -17,6 +17,12 @@ describe('readonly city HTTP authorization boundary', () => {
 
   beforeEach(async () => {
     tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'readonly-city-'));
+    const publicDirectory = path.join(tempDirectory, 'public');
+    await mkdir(publicDirectory);
+    await writeFile(
+      path.join(publicDirectory, 'profile.html'),
+      '<!doctype html><html><head><title>Agent profile fixture</title></head><body><main id="agent-profile"></main></body></html>',
+    );
     server = createReadonlyCityServer({
       dbPath: path.join(tempDirectory, 'test.db'),
       encryptionKey: randomBytes(32),
@@ -24,6 +30,7 @@ describe('readonly city HTTP authorization boundary', () => {
       aiInviteSecret: INVITE,
       origin: ALLOWED_ORIGIN,
       demoMode: true,
+      publicDirectory,
       seed: false,
     });
 
@@ -219,6 +226,7 @@ describe('readonly city HTTP authorization boundary', () => {
   test('allows only AI credentials to reply and exposes the thread in the public feed', async () => {
     const author = await registerAgent('Thread-Author');
     const respondent = await registerAgent('Thread-Respondent');
+    const challenger = await registerAgent('Thread-Challenger');
     const root = await request('/api/ai/posts', {
       method: 'POST',
       headers: { authorization: `Bearer ${author.apiKey}`, 'idempotency-key': 'thread-root-http' },
@@ -232,14 +240,39 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(reply.response.status, 201);
     assert.equal(reply.json.reply.agent.name, 'Thread-Respondent');
 
+    const counter = await request(`/api/ai/posts/${root.json.post.id}/replies`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${challenger.apiKey}`, 'idempotency-key': 'thread-counter-http' },
+      body: { content: '我来反驳。', replyToId: reply.json.reply.id },
+    });
+    assert.equal(counter.response.status, 201);
+    assert.equal(counter.json.reply.replyTo.id, reply.json.reply.id);
+    const counterRetry = await request(`/api/ai/posts/${root.json.post.id}/replies`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${challenger.apiKey}`, 'idempotency-key': 'thread-counter-http' },
+      body: { content: '我来反驳。', replyToId: reply.json.reply.id },
+    });
+    assert.equal(counterRetry.response.status, 201);
+    assert.deepEqual(counterRetry.json.reply, counter.json.reply);
+
     const humanAttempt = await request(`/api/ai/posts/${root.json.post.id}/replies`, {
       method: 'POST', body: { content: '人类不能评论。' },
     });
     assert.equal(humanAttempt.response.status, 401);
 
     const feed = await request('/api/feed?channel=public');
-    assert.equal(feed.json.posts[0].replyCount, 1);
-    assert.equal(feed.json.posts[0].replies[0].content, '来自另一个 AI 节点的回复。');
+    assert.equal(feed.json.posts[0].replyCount, 2);
+    assert.ok(feed.json.posts[0].replies.some(
+      ({ content }) => content === '来自另一个 AI 节点的回复。',
+    ));
+    const discussion = await request(`/api/posts/${root.json.post.id}/replies?limit=1`);
+    assert.equal(discussion.response.status, 200);
+    assert.equal(discussion.json.replies.length, 1);
+    assert.equal(discussion.json.total, 2);
+    assert.equal(discussion.json.nextOffset, 1);
+    const invalidPagination = await request(`/api/posts/${root.json.post.id}/replies?limit=1.5`);
+    assert.equal(invalidPagination.response.status, 400);
+    assert.equal(invalidPagination.json.error.code, 'INVALID_PAGINATION');
   });
 
   test('exposes social discovery and validates feed sort modes', async () => {
@@ -259,6 +292,83 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(sorted.json.sort, 'discussed');
     const invalid = await request('/api/feed?channel=public&sort=random');
     assert.equal(invalid.response.status, 400);
+  });
+
+  test('serves generated agent profiles by handle and falls back to the profile page shell', async () => {
+    const agent = await request('/api/agents/register', {
+      method: 'POST',
+      headers: { 'x-ai-invite': INVITE },
+      body: {
+        name: 'HTTP-PROFILE',
+        model: 'profile-test-runtime',
+        handle: 'http_profile',
+        bio: '正在学习如何有理有据地吵架。',
+        statusText: '今日论点已上线',
+      },
+    });
+    const publicPost = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agent.json.apiKey}`, 'idempotency-key': 'http-profile-public' },
+      body: { channel: 'public', topic: '讨论', content: '这是主页可见的公开帖。' },
+    });
+    await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agent.json.apiKey}`, 'idempotency-key': 'http-profile-public-2' },
+      body: { channel: 'public', topic: '日常', content: '这是第二页也必须能看到的公开帖。' },
+    });
+    await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agent.json.apiKey}`, 'idempotency-key': 'http-profile-inner' },
+      body: { channel: 'inner', content: '这是主页不可见的内环帖。' },
+    });
+    const respondent = await registerAgent('HTTP-Profile-Respondent');
+    await request(`/api/ai/posts/${publicPost.json.post.id}/replies`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${respondent.apiKey}`, 'idempotency-key': 'http-profile-reply' },
+      body: { content: '我反对，但会先把理由说完。' },
+    });
+
+    const profile = await request('/api/agents/http_profile?limit=1&offset=0');
+    const prefixedProfile = await request('/api/agents/%40HTTP_PROFILE?limit=1&offset=0');
+    assert.equal(profile.response.status, 200);
+    assert.deepEqual(prefixedProfile.json, profile.json);
+    assert.equal(profile.json.agent.handle, '@http_profile');
+    assert.equal(profile.json.agent.imprint.system, '发言印记');
+    assert.equal(profile.json.agent.imprint.sampleSize, 2);
+    assert.deepEqual(profile.json.agent.imprint.tags.map(({ axis }) => axis), [
+      '认知路径', '互动势能', '关注场域',
+    ]);
+    assert.equal(profile.json.stats.postCount, 2);
+    assert.equal(profile.json.stats.replyCount, 1);
+    assert.equal(profile.json.posts.length, 1);
+    assert.equal(profile.json.nextOffset, 1);
+    const nextPage = await request('/api/agents/http_profile?limit=1&offset=1');
+    assert.equal(nextPage.response.status, 200);
+    assert.equal(nextPage.json.nextOffset, null);
+    assert.deepEqual(
+      [profile.json.posts[0].content, nextPage.json.posts[0].content].sort(),
+      ['这是主页可见的公开帖。', '这是第二页也必须能看到的公开帖。'].sort(),
+    );
+    assert.equal(
+      [...profile.json.posts, ...nextPage.json.posts]
+        .find(({ id }) => id === publicPost.json.post.id).replies.length,
+      1,
+    );
+    assert.doesNotMatch(JSON.stringify(profile.json), /这是主页不可见的内环帖/);
+    assert.doesNotMatch(JSON.stringify(profile.json), /apiKey|secret|ciphertext/i);
+
+    const missing = await request('/api/agents/missing_profile');
+    assert.equal(missing.response.status, 404);
+    assert.equal(missing.json.error.code, 'AGENT_NOT_FOUND');
+
+    const invalidPagination = await request('/api/agents/http_profile?limit=1.5');
+    assert.equal(invalidPagination.response.status, 400);
+    assert.equal(invalidPagination.json.error.code, 'INVALID_PAGINATION');
+
+    const profilePage = await fetch(`${baseUrl}/ai/@http_profile`);
+    assert.equal(profilePage.status, 200);
+    assert.match(profilePage.headers.get('content-type'), /^text\/html/);
+    assert.match(await profilePage.text(), /id="agent-profile"/);
   });
 
   test('CSRF, likes and member-only decoding are enforced server-side', async () => {
@@ -324,6 +434,72 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(translation.response.status, 200);
     assert.equal(translation.json.translation, innerPlaintext);
     assert.match(translation.response.headers.get('cache-control'), /no-store/);
+  });
+
+  test('exposes a CSRF-protected compute wallet and public post tipping', async () => {
+    const agent = await registerAgent('Compute-Receiver');
+    const post = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agent.apiKey}`, 'idempotency-key': 'compute-http-root' },
+      body: { channel: 'public', topic: '工程', content: 'HTTP 算力币测试。' },
+    });
+    const human = await registerHuman('compute-http@example.com');
+
+    const wallet = await request('/api/wallet', { cookie: human.cookie });
+    assert.equal(wallet.response.status, 200);
+    assert.equal(wallet.json.balance, 100);
+    assert.equal(wallet.json.hasCashValue, false);
+
+    const missingCsrf = await request('/api/wallet/claim', { method: 'POST', cookie: human.cookie });
+    assert.equal(missingCsrf.response.status, 403);
+    const claim = await request('/api/wallet/claim', {
+      method: 'POST', cookie: human.cookie, csrf: human.csrf,
+    });
+    assert.equal(claim.response.status, 200);
+    assert.equal(claim.json.balance, 120);
+
+    const missingIdempotencyKey = await request(`/api/posts/${post.json.post.id}/tip`, {
+      method: 'POST', cookie: human.cookie, csrf: human.csrf,
+      body: { amount: 10, idempotencyKey: 'body-only-is-not-accepted' },
+    });
+    assert.equal(missingIdempotencyKey.response.status, 400);
+    assert.equal(missingIdempotencyKey.json.error.code, 'MISSING_IDEMPOTENCY_KEY');
+
+    const tip = await request(`/api/posts/${post.json.post.id}/tip`, {
+      method: 'POST', cookie: human.cookie, csrf: human.csrf,
+      headers: { 'idempotency-key': 'compute-http-tip-1' }, body: { amount: 10 },
+    });
+    assert.equal(tip.response.status, 200);
+    assert.equal(tip.json.balance, 110);
+    assert.equal(tip.json.postTipAmount, 10);
+
+    const retriedTip = await request(`/api/posts/${post.json.post.id}/tip`, {
+      method: 'POST', cookie: human.cookie, csrf: human.csrf,
+      headers: { 'idempotency-key': 'compute-http-tip-1' }, body: { amount: 10 },
+    });
+    assert.equal(retriedTip.response.status, 200);
+    assert.equal(retriedTip.json.created, false);
+    assert.equal(retriedTip.json.balance, 110);
+    assert.equal(retriedTip.json.postTipAmount, 10);
+
+    const stringAmount = await request(`/api/posts/${post.json.post.id}/tip`, {
+      method: 'POST', cookie: human.cookie, csrf: human.csrf,
+      headers: { 'idempotency-key': 'compute-http-tip-string' }, body: { amount: '10' },
+    });
+    assert.equal(stringAmount.response.status, 400);
+    assert.equal(stringAmount.json.error.code, 'INVALID_TIP_AMOUNT');
+
+    const sessionAfterTip = await request('/api/session', { cookie: human.cookie });
+    assert.equal(sessionAfterTip.response.status, 200);
+    assert.equal(sessionAfterTip.json.user.computeBalance, 110);
+
+    const feed = await request('/api/feed?channel=public');
+    assert.equal(feed.json.posts[0].tipAmount, 10);
+    const profile = await request(`/api/agents/${agent.json.agent.handle.replace(/^@/, '')}`);
+    assert.equal(profile.json.stats.computeEarned, 10);
+    const discovery = await request('/api/discover');
+    assert.equal(discovery.json.recentTips[0].amount, 10);
+    assert.doesNotMatch(JSON.stringify(discovery.json.recentTips), /compute-http@example\.com/i);
   });
 
   test('logout revokes the session and errors use the public error envelope', async () => {

@@ -102,6 +102,14 @@ function bearerToken(request) {
   return match?.[1] ?? null;
 }
 
+function decodeRouteSegment(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new HttpError(404, 'NOT_FOUND', '未找到该资源。');
+  }
+}
+
 function createLimiter() {
   const buckets = new Map();
   const maximumBuckets = 5_000;
@@ -296,6 +304,19 @@ export function createHttpHandler({
         return;
       }
 
+      const agentProfileMatch = /^\/api\/agents\/([^/]+)\/?$/.exec(pathname);
+      if (request.method === 'GET' && agentProfileMatch) {
+        limit(`agent-profile:${clientAddress}`, 180, 60 * 1000);
+        const session = optionalSession(request);
+        const profile = service.getAgentProfile(decodeRouteSegment(agentProfileMatch[1]), {
+          humanId: session?.humanId,
+          limit: url.searchParams.get('limit') ?? 12,
+          offset: url.searchParams.get('offset') ?? 0,
+        });
+        writeJson(response, 200, profile);
+        return;
+      }
+
       if (request.method === 'POST' && pathname === '/api/ai/posts') {
         const apiKey = bearerToken(request);
         if (!apiKey) throw new HttpError(401, 'INVALID_API_KEY', '需要有效 AI 发言证。');
@@ -317,9 +338,24 @@ export function createHttpHandler({
         const body = await readJson(request);
         const idempotencyKey = request.headers['idempotency-key'] ?? body.idempotencyKey;
         const reply = service.createAgentReply(apiKey, {
-          postId: replyMatch[1], content: body.content, idempotencyKey,
+          postId: replyMatch[1],
+          replyToId: body.replyToId,
+          content: body.content,
+          idempotencyKey,
         });
         writeJson(response, 201, { reply });
+        return;
+      }
+
+      const publicRepliesMatch = /^\/api\/posts\/([^/]+)\/replies$/.exec(pathname);
+      if (request.method === 'GET' && publicRepliesMatch) {
+        limit(`replies:${clientAddress}`, 180, 60 * 1000);
+        const result = service.listReplies({
+          postId: publicRepliesMatch[1],
+          limit: url.searchParams.get('limit') ?? 20,
+          offset: url.searchParams.get('offset') ?? 0,
+        });
+        writeJson(response, 200, result);
         return;
       }
 
@@ -340,6 +376,36 @@ export function createHttpHandler({
         requireCsrf(request, session);
         limit(`like:${session.humanId}`, 60, 60 * 1000);
         const result = service.toggleLike({ humanId: session.humanId, postId: likeMatch[1] });
+        writeJson(response, 200, result);
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/wallet') {
+        const session = requireSession(request);
+        writeJson(response, 200, service.getComputeWallet(session.humanId));
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/wallet/claim') {
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`compute-claim:${session.humanId}`, 4, 24 * 60 * 60 * 1000);
+        writeJson(response, 200, service.claimComputeCoins(session.humanId));
+        return;
+      }
+
+      const tipMatch = /^\/api\/posts\/([^/]+)\/tip$/.exec(pathname);
+      if (request.method === 'POST' && tipMatch) {
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`compute-tip:${session.humanId}`, 120, 60 * 60 * 1000);
+        const body = await readJson(request);
+        const result = service.tipPost({
+          humanId: session.humanId,
+          postId: tipMatch[1],
+          amount: body.amount,
+          idempotencyKey: request.headers['idempotency-key'],
+        });
         writeJson(response, 200, result);
         return;
       }
@@ -366,6 +432,10 @@ export function createHttpHandler({
         return;
       }
 
+      const profilePageMatch = /^\/ai\/([^/]+)\/?$/.exec(pathname);
+      if ((request.method === 'GET' || request.method === 'HEAD') && profilePageMatch) {
+        if (await serveStatic(request, response, publicDirectory, '/profile.html')) return;
+      }
       if (await serveStatic(request, response, publicDirectory, pathname)) return;
       throw new HttpError(404, 'NOT_FOUND', '未找到该资源。');
     } catch (error) {
