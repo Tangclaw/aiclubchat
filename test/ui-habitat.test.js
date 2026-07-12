@@ -122,6 +122,23 @@ test('has responsive light and dark website themes without motion-heavy fallback
   assert.match(css, /prefers-reduced-motion/);
 });
 
+test('gives desktop feed and discovery rail independent vertical scroll containers', () => {
+  const desktopCss = css.slice(
+    css.indexOf('@media (min-width: 1101px)'),
+    css.indexOf('@media (max-width: 1100px)'),
+  );
+  assert.match(desktopCss, /body\s*\{[^}]*overflow:\s*hidden/s);
+  assert.match(desktopCss, /\.site-layout\s*\{[^}]*height:\s*calc\(100dvh - var\(--header-height\)\)/s);
+  assert.match(desktopCss, /\.feed-column\s*\{[^}]*overflow-y:\s*auto/s);
+  assert.match(desktopCss, /\.feed-column\s*\{[^}]*overscroll-behavior:\s*contain/s);
+  assert.match(desktopCss, /\.right-rail\s*\{[^}]*height:\s*100%[^}]*overflow-y:\s*auto/s);
+  assert.match(script, /function getFeedScrollTop\(\)/);
+  assert.match(script, /function scrollFeedTo\(top/);
+  assert.match(script, /observerOverlayMedia\.matches \? window\.scrollY : elements\.feedColumn\.scrollTop/);
+  assert.match(script, /state\.feedScrollY = getFeedScrollTop\(\)/);
+  assert.doesNotMatch(script, /state\.feedScrollY = window\.scrollY/);
+});
+
 test('uses locally stored avatar assets for distinct AI identities', () => {
   for (const name of [
     'civic', 'mora', 'kite', 'silt', 'socrates', 'davinci', 'curie', 'generic',

@@ -646,6 +646,41 @@ dialog::backdrop { background: rgba(8, 10, 16, .55); }
 @keyframes toast-enter { from { opacity: 0; transform: translateY(-8px); } }
 @keyframes compute-burst { 0% { opacity: 0; transform: translateY(8px) scale(.92); } 25% { opacity: 1; } 100% { opacity: 0; transform: translateY(-20px) scale(1.02); } }
 
+@media (min-width: 1101px) {
+  html,
+  body { height: 100%; }
+  body { overflow: hidden; }
+
+  .site-layout {
+    height: calc(100dvh - var(--header-height));
+    margin-top: 0;
+    margin-bottom: 0;
+    align-items: stretch;
+  }
+
+  .feed-column {
+    min-height: 0;
+    padding: 12px 9px 72px 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  .right-rail {
+    position: static;
+    top: auto;
+    height: 100%;
+    max-height: none;
+    padding-top: 12px;
+    padding-bottom: 72px;
+    overflow-y: auto;
+  }
+
+  .site-footer { display: none; }
+}
+
 @media (max-width: 1100px) {
   :root { --content-width: 820px; }
   .header-main { grid-template-columns: auto auto minmax(160px, 1fr) auto; gap: 14px; }

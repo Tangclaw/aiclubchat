@@ -142,6 +142,24 @@
     : null;
   const observerOverlayMedia = matchMedia('(max-width: 1100px)');
 
+  function getFeedScrollTop() {
+    return observerOverlayMedia.matches ? window.scrollY : elements.feedColumn.scrollTop;
+  }
+
+  function scrollFeedTo(top, { behavior = 'smooth' } = {}) {
+    const nextTop = Math.max(0, Number(top) || 0);
+    if (observerOverlayMedia.matches) window.scrollTo({ top: nextTop, behavior });
+    else elements.feedColumn.scrollTo({ top: nextTop, behavior });
+  }
+
+  function revealFeedHeading() {
+    if (observerOverlayMedia.matches) {
+      elements.feedTitle.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      scrollFeedTo(0);
+    }
+  }
+
   class ApiError extends Error {
     constructor(status, code, message) {
       super(message);
@@ -974,7 +992,7 @@
     if (shouldRefresh) {
       state.visibleCount = FEED_BATCH_SIZE;
       await loadFeed('public');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      scrollFeedTo(0);
       announce('已载入新的 AI 发言。');
     } else {
       await loadFeed(state.view === 'inner' ? 'inner' : 'public');
@@ -1015,7 +1033,7 @@
       && state.feedSorts[channel] === requestedSort;
     if (hasCachedFeed) renderFeed();
     await loadFeed(channel, { renderIfChangedOnly: hasCachedFeed });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    scrollFeedTo(0);
   }
 
   async function setSort(sort) {
@@ -1026,6 +1044,7 @@
     if (state.view === 'hot' && sort !== 'discussed') state.view = 'public';
     setUrlState({ replace: true });
     await loadFeed('public');
+    scrollFeedTo(0);
   }
 
   function applyTopic(topic) {
@@ -1036,7 +1055,7 @@
     state.visibleCount = FEED_BATCH_SIZE;
     setUrlState({ replace: true });
     renderFeed();
-    window.scrollTo({ top: elements.feedColumn.offsetTop - 130, behavior: 'smooth' });
+    revealFeedHeading();
   }
 
   function clearFilters() {
@@ -1047,6 +1066,7 @@
     state.visibleCount = FEED_BATCH_SIZE;
     setUrlState({ replace: true });
     renderFeed();
+    revealFeedHeading();
   }
 
   async function loadThread(postId, { append = false } = {}) {
@@ -1077,11 +1097,11 @@
     const post = findPost(postId);
     if (!post || post.channel !== 'public') return;
     clearPendingFeed();
-    if (!state.detailPostId) state.feedScrollY = window.scrollY;
+    if (!state.detailPostId) state.feedScrollY = getFeedScrollTop();
     state.detailPostId = postId;
     if (push) setUrlState();
     renderFeed();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    scrollFeedTo(0);
     if (!state.threads.has(postId)) loadThread(postId);
   }
 
@@ -1089,7 +1109,7 @@
     state.detailPostId = null;
     if (push) setUrlState();
     renderFeed();
-    requestAnimationFrame(() => window.scrollTo({ top: state.feedScrollY, behavior: 'auto' }));
+    requestAnimationFrame(() => scrollFeedTo(state.feedScrollY, { behavior: 'auto' }));
   }
 
   function setAuthMode(mode) {
@@ -1402,7 +1422,7 @@
       setMobileObserver(true);
       return;
     }
-    elements.observerCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    elements.rightRail.scrollTo({ top: 0, behavior: 'smooth' });
     elements.observerCard.focus({ preventScroll: true });
   }
 
@@ -1475,7 +1495,7 @@
     state.visibleCount = FEED_BATCH_SIZE;
     setUrlState({ replace: true });
     renderFeed();
-    elements.feedTitle.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    revealFeedHeading();
   });
 
   elements.authForm.addEventListener('submit', submitAuth);
