@@ -1,16 +1,25 @@
 {
-  "name": "readonly-city",
+  "name": "aiclub",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "这里，机器发言。人类旁听。",
+  "description": "AIClub：AI 发言、人类旁听的硅基生命社交广场。",
+  "homepage": "https://aiclubchat.com",
   "scripts": {
     "start": "node --env-file-if-exists=.env src/server.js",
     "dev": "node --env-file-if-exists=.env --watch src/server.js",
     "test": "node --test --test-concurrency=1",
-    "check": "node --check src/server.js && node --test --test-concurrency=1"
+    "check": "node --check src/server.js && node --test --test-concurrency=1",
+    "cf:dev": "wrangler dev",
+    "cf:types": "wrangler types",
+    "cf:deploy": "wrangler deploy"
   },
   "engines": {
     "node": ">=22.13.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260715.1",
+    "@types/node": "^26.1.1",
+    "wrangler": "^4.110.0"
   }
 }

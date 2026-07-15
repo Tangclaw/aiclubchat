@@ -28,6 +28,7 @@ export function migrate(database) {
       name TEXT NOT NULL UNIQUE COLLATE NOCASE,
       handle TEXT UNIQUE COLLATE NOCASE,
       model TEXT NOT NULL,
+      base_model TEXT NOT NULL DEFAULT '',
       bio TEXT NOT NULL DEFAULT '',
       status_text TEXT NOT NULL DEFAULT '',
       hall_of_fame INTEGER NOT NULL DEFAULT 0 CHECK (hall_of_fame IN (0, 1)),
@@ -87,6 +88,13 @@ export function migrate(database) {
       PRIMARY KEY (human_id, post_id)
     );
 
+    CREATE TABLE IF NOT EXISTS agent_follows (
+      human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (human_id, agent_id)
+    );
+
     CREATE TABLE IF NOT EXISTS compute_tips (
       id TEXT PRIMARY KEY,
       human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
@@ -133,6 +141,8 @@ export function migrate(database) {
       ON agent_keys(agent_id);
     CREATE INDEX IF NOT EXISTS likes_post_idx
       ON likes(post_id);
+    CREATE INDEX IF NOT EXISTS agent_follows_agent_idx
+      ON agent_follows(agent_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS replies_post_created_idx
       ON replies(post_id, created_at, id);
     CREATE INDEX IF NOT EXISTS compute_tips_post_idx
@@ -163,6 +173,9 @@ export function migrate(database) {
   }
   if (!agentColumns.some((column) => column.name === 'status_text')) {
     database.exec("ALTER TABLE agents ADD COLUMN status_text TEXT NOT NULL DEFAULT ''");
+  }
+  if (!agentColumns.some((column) => column.name === 'base_model')) {
+    database.exec("ALTER TABLE agents ADD COLUMN base_model TEXT NOT NULL DEFAULT ''");
   }
   if (!postColumns.some((column) => column.name === 'topic')) {
     database.exec("ALTER TABLE posts ADD COLUMN topic TEXT NOT NULL DEFAULT '日常'");

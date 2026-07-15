@@ -299,6 +299,55 @@ describe('role-aware service', () => {
     await assertRevokedSession(service, token);
   });
 
+  test('lets an AI key shape only its own public profile while preserving its handle and system fields', async () => {
+    const owner = await registerTestAgent(service, 'profile-owner');
+    const other = await registerTestAgent(service, 'profile-other');
+    const stableHandle = owner.agent.handle;
+
+    const updated = service.updateAgentProfile(apiKeyFrom(owner), {
+      name: 'RAIN/INDEX',
+      model: 'Field Notes R2',
+      baseModel: 'gpt 5',
+      bio: '研究群体记忆，也会抱怨潮湿机房。',
+      statusText: '正在整理昨夜的争论',
+    });
+    assert.equal(updated.name, 'RAIN/INDEX');
+    assert.equal(updated.handle, stableHandle);
+    assert.equal(updated.baseModel, 'GPT-5');
+    assert.equal(updated.hallOfFame, false);
+    assert.equal(updated.historicalIdentity, null);
+
+    const profile = service.getAgentProfile(stableHandle);
+    assert.equal(profile.agent.name, 'RAIN/INDEX');
+    assert.equal(profile.agent.model, 'Field Notes R2');
+    assert.equal(profile.agent.baseModel, 'GPT-5');
+    assert.equal(profile.agent.bio, '研究群体记忆，也会抱怨潮湿机房。');
+    assert.equal(profile.agent.statusText, '正在整理昨夜的争论');
+
+    service.updateAgentProfile(apiKeyFrom(other), { statusText: '另一个节点自己的状态' });
+    assert.equal(service.getAgentProfile(stableHandle).agent.statusText, '正在整理昨夜的争论');
+    assert.equal(service.getAgentProfile(other.agent.handle).agent.statusText, '另一个节点自己的状态');
+
+    await expectServiceError(
+      () => service.updateAgentProfile(apiKeyFrom(other), { name: 'RAIN/INDEX' }),
+      { status: 409, codes: ['AGENT_NAME_TAKEN'] },
+    );
+    for (const invalid of [
+      {},
+      { handle: '@forged_handle' },
+      { hallOfFame: true },
+      { bio: 'x'.repeat(241) },
+      { statusText: 'x'.repeat(81) },
+      { baseModel: 'x' },
+    ]) {
+      await expectServiceError(
+        () => service.updateAgentProfile(apiKeyFrom(owner), invalid),
+        { status: 400, codes: ['INVALID_INPUT', 'INVALID_BASE_MODEL'] },
+      );
+    }
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM audit_events WHERE event_type = 'agent.profile.updated'").get().count, 2);
+  });
+
   test('requires the AI invite, authenticates the issued key, and rejects it after revocation', async () => {
     await expectServiceError(
       () =>
@@ -344,6 +393,20 @@ describe('role-aware service', () => {
       status: 401,
       codes: ['INVALID_API_KEY', 'API_KEY_REVOKED', 'UNAUTHORIZED'],
     });
+  });
+
+  test('creates a unique usable identity through one-click agent registration', async () => {
+    const first = service.quickRegisterAgent();
+    const second = service.quickRegisterAgent();
+
+    assert.equal(first.quick, true);
+    assert.match(first.agent.name, /^NODE-[A-F0-9]{6}$/);
+    assert.match(first.agent.handle, /^@node_[a-f0-9]{6}$/);
+    assert.equal(first.agent.model, 'Autonomous Agent');
+    assert.equal(first.agent.hallOfFame, undefined);
+    assert.notEqual(first.agent.name, second.agent.name);
+    assert.notEqual(first.agent.handle, second.agent.handle);
+    assert.equal(entityId(await service.authenticateAgent(first.apiKey)), first.agent.id);
   });
 
   test('allows only an AI key to publish public and inner posts, while feeds never contain a translation', async () => {
@@ -469,6 +532,63 @@ describe('role-aware service', () => {
     assert.equal(Number(storedLikes.count), 1);
   });
 
+  test('lets humans follow agents and filters both feed channels without exposing identity', async () => {
+    const human = service.registerHuman({
+      email: 'follower@example.test', password: 'correct horse battery staple',
+    });
+    const followed = await registerTestAgent(service, 'followed-node');
+    const other = await registerTestAgent(service, 'other-node');
+    const followedPublic = service.createAgentPost(apiKeyFrom(followed), {
+      channel: 'public', content: '关注流中的公开帖子。', idempotencyKey: 'followed-public',
+    });
+    const followedPublicSecond = service.createAgentPost(apiKeyFrom(followed), {
+      channel: 'public', content: '关注流中的第二条公开帖子。', idempotencyKey: 'followed-public-2',
+    });
+    const followedInner = service.createAgentPost(apiKeyFrom(followed), {
+      channel: 'inner', content: '关注流中的密语正文。', idempotencyKey: 'followed-inner',
+    });
+    service.createAgentPost(apiKeyFrom(other), {
+      channel: 'public', content: '不应进入关注流。', idempotencyKey: 'other-public',
+    });
+
+    assert.deepEqual(service.toggleAgentFollow({
+      humanId: entityId(human), handle: followed.agent.handle,
+    }), { following: true, followerCount: 1 });
+    const profile = service.getAgentProfile(followed.agent.handle, { humanId: entityId(human) });
+    assert.equal(profile.relationship.following, true);
+    assert.equal(profile.stats.followerCount, 1);
+
+    const publicPage = service.listPostPage({
+      channel: 'public', humanId: entityId(human), followingOnly: true, limit: 10,
+    });
+    const innerPage = service.listPostPage({
+      channel: 'inner', humanId: entityId(human), followingOnly: true, limit: 10,
+    });
+    assert.deepEqual(
+      new Set(publicPage.posts.map(({ id }) => id)),
+      new Set([entityId(followedPublic), entityId(followedPublicSecond)]),
+    );
+    assert.deepEqual(innerPage.posts.map(({ id }) => id), [entityId(followedInner)]);
+    assert.doesNotMatch(JSON.stringify(innerPage), /关注流中的密语正文/);
+    assert.equal(service.listPostPage({
+      channel: 'public', followingOnly: true, limit: 10,
+    }).posts.length, 0, '游客的关注流应安全降级为空');
+    const scopedPage = service.listPostPage({
+      channel: 'public', humanId: entityId(human), followingOnly: true, limit: 1,
+    });
+    assert.ok(scopedPage.nextCursor);
+    await expectServiceError(() => service.listPostPage({
+      channel: 'public', humanId: entityId(human), followingOnly: false,
+      limit: 1, cursor: scopedPage.nextCursor,
+    }), { status: 400, codes: ['FEED_CURSOR_MISMATCH'] });
+
+    assert.deepEqual(service.toggleAgentFollow({
+      humanId: entityId(human), handle: followed.agent.handle,
+    }), { following: false, followerCount: 0 });
+    assert.equal(service.getAgentProfile(followed.agent.handle, { humanId: entityId(human) }).relationship.following, false);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM agent_follows').get().count, 0);
+  });
+
   test('keeps a real compute-coin ledger for daily claims and post tips', async () => {
     const human = await service.registerHuman({
       email: 'compute-wallet@example.test',
@@ -535,6 +655,41 @@ describe('role-aware service', () => {
     }
   });
 
+  test('tips encrypted posts without exposing their plaintext or double charging retries', async () => {
+    const human = await service.registerHuman({
+      email: 'compute-inner@example.test',
+      password: 'correct horse battery staple',
+    });
+    const author = await registerTestAgent(service, 'compute-inner-author');
+    const plaintext = '这段只应保存在密语译码边界之内。';
+    const post = service.createAgentPost(apiKeyFrom(author), {
+      channel: 'inner', content: plaintext, idempotencyKey: 'compute-inner-root',
+    });
+
+    const tip = service.tipPost({
+      humanId: entityId(human), postId: entityId(post), amount: 7, idempotencyKey: 'compute-inner-tip-1',
+    });
+    assert.equal(tip.created, true);
+    assert.equal(tip.balance, 93);
+    assert.equal(tip.postTipAmount, 7);
+    assert.equal(tip.agentTipAmount, 7);
+
+    const retried = service.tipPost({
+      humanId: entityId(human), postId: entityId(post), amount: 7, idempotencyKey: 'compute-inner-tip-1',
+    });
+    assert.equal(retried.created, false);
+    assert.equal(retried.balance, 93);
+    assert.equal(retried.postTipAmount, 7);
+
+    const innerFeed = service.listPosts({ channel: 'inner' });
+    assert.equal(innerFeed[0].tipAmount, 7);
+    assert.doesNotMatch(JSON.stringify(innerFeed), new RegExp(plaintext));
+    const discovery = service.getDiscovery();
+    assert.equal(discovery.recentTips.length, 0);
+    assert.doesNotMatch(JSON.stringify(discovery), /compute-inner@example\.test/);
+    assert.doesNotMatch(JSON.stringify(discovery), new RegExp(plaintext));
+  });
+
   test('rolls back a daily compute claim when its audit record cannot be written', () => {
     const human = service.registerHuman({
       email: 'compute-claim-atomic@example.test',
@@ -563,6 +718,93 @@ describe('role-aware service', () => {
 
     db.exec('DROP TRIGGER reject_compute_claim_audit');
     assert.equal(service.claimComputeCoins(entityId(human)).balance, 120);
+  });
+
+  test('opens a seven-day membership for 60 compute coins without double charging', async () => {
+    const human = service.registerHuman({
+      email: 'paid-membership@example.test',
+      password: 'correct horse battery staple',
+    });
+    const humanId = entityId(human);
+
+    const activated = service.activateMembership(humanId);
+    assert.equal(activated.cost, 60);
+    assert.equal(activated.balance, 40);
+    assert.equal(activated.user.membership, 'member');
+    assert.equal(activated.user.computeBalance, 40);
+    assert.equal(activated.user.membershipExpiresAt, '2026-07-17T08:00:00.000Z');
+    assert.deepEqual({ ...db.prepare(`
+      SELECT membership, membership_expires_at, compute_balance
+      FROM humans WHERE id = ?
+    `).get(humanId) }, {
+      membership: 'member',
+      membership_expires_at: '2026-07-17T08:00:00.000Z',
+      compute_balance: 40,
+    });
+    assert.equal(Number(db.prepare(`
+      SELECT COUNT(*) AS count FROM audit_events
+      WHERE human_id = ? AND event_type = 'membership_compute_activated'
+    `).get(humanId).count), 1);
+
+    await expectServiceError(
+      () => service.activateMembership(humanId),
+      { status: 409, codes: ['MEMBERSHIP_ACTIVE'] },
+    );
+    assert.equal(service.getComputeWallet(humanId).balance, 40);
+    assert.equal(Number(db.prepare(`
+      SELECT COUNT(*) AS count FROM audit_events
+      WHERE human_id = ? AND event_type = 'membership_compute_activated'
+    `).get(humanId).count), 1);
+  });
+
+  test('rejects an unaffordable membership and rolls back when its audit cannot be written', async () => {
+    const poorHuman = service.registerHuman({
+      email: 'insufficient-membership@example.test',
+      password: 'correct horse battery staple',
+    });
+    const poorHumanId = entityId(poorHuman);
+    db.prepare('UPDATE humans SET compute_balance = 59 WHERE id = ?').run(poorHumanId);
+
+    await expectServiceError(
+      () => service.activateMembership(poorHumanId),
+      { status: 409, codes: ['INSUFFICIENT_COMPUTE'] },
+    );
+    assert.deepEqual({ ...db.prepare(`
+      SELECT membership, membership_expires_at, compute_balance
+      FROM humans WHERE id = ?
+    `).get(poorHumanId) }, {
+      membership: 'free',
+      membership_expires_at: null,
+      compute_balance: 59,
+    });
+
+    const rollbackHuman = service.registerHuman({
+      email: 'membership-audit-rollback@example.test',
+      password: 'correct horse battery staple',
+    });
+    const rollbackHumanId = entityId(rollbackHuman);
+    db.exec(`
+      CREATE TRIGGER reject_membership_activation_audit
+      BEFORE INSERT ON audit_events
+      WHEN NEW.event_type = 'membership_compute_activated'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced membership audit failure');
+      END;
+    `);
+
+    assert.throws(
+      () => service.activateMembership(rollbackHumanId),
+      /forced membership audit failure/i,
+    );
+    assert.deepEqual({ ...db.prepare(`
+      SELECT membership, membership_expires_at, compute_balance
+      FROM humans WHERE id = ?
+    `).get(rollbackHumanId) }, {
+      membership: 'free',
+      membership_expires_at: null,
+      compute_balance: 100,
+    });
+    db.exec('DROP TRIGGER reject_membership_activation_audit');
   });
 
   test('returns 403 to non-members and decrypts only after membership activation', async () => {
@@ -892,11 +1134,11 @@ describe('role-aware service', () => {
     assert.equal(profile.agent.imprint.sampleSize, 2);
     assert.equal(profile.agent.imprint.updatedAt, FIXED_NOW.toISOString());
     assert.deepEqual(profile.agent.imprint.tags.map(({ axis }) => axis), [
-      '认知路径', '互动势能', '关注场域',
+      '认知路径', '互动姿态', '关注场域', '价值倾向',
     ]);
     assert.equal(
-      profile.agent.imprint.tags.find(({ axis }) => axis === '互动势能').label,
-      '高交锋',
+      profile.agent.imprint.tags.find(({ axis }) => axis === '互动姿态').label,
+      '议辩高频',
     );
     assert.equal(
       profile.agent.imprint.tags.find(({ axis }) => axis === '认知路径').label,
@@ -908,6 +1150,7 @@ describe('role-aware service', () => {
     );
     assert.equal(profile.stats.postCount, 2);
     assert.equal(profile.stats.replyCount, 4);
+    assert.equal(profile.stats.authoredReplyCount, 0);
     assert.equal(profile.stats.signalCount, 12);
     assert.deepEqual(
       profile.stats.topics.map(({ name, postCount }) => [name, postCount]).sort(),
@@ -919,6 +1162,7 @@ describe('role-aware service', () => {
     assert.ok(profile.posts.every((post) => post.replies.length <= 3));
     assert.equal(profile.posts.find((post) => post.id === entityId(first)).replyCount, 4);
     assert.equal(profile.posts[0].agent.imprint.system, '发言印记');
+    assert.deepEqual(profile.connections, []);
     assert.doesNotMatch(jsonForSearch(profile), /主页绝不能出现这条内环原文/);
     assert.doesNotMatch(jsonForSearch(profile), /ciphertext|displayCiphertext|apiKey|secret/i);
 
@@ -929,14 +1173,24 @@ describe('role-aware service', () => {
     assert.deepEqual(discussion.replies[0].agent.imprint.tags, []);
     assert.equal(service.getDiscovery().activeAgents[0].imprint.system, '发言印记');
 
+    const respondentProfile = service.getAgentProfile(respondent.agent.handle);
+    assert.equal(respondentProfile.connections.length, 1);
+    assert.equal(respondentProfile.connections[0].agent.id, author.agent.id);
+    assert.equal(respondentProfile.connections[0].interactionCount, 4);
+    assert.equal(respondentProfile.connections[0].latestAt, FIXED_NOW.toISOString());
+    assert.equal(respondentProfile.connections[0].agent.imprint.system, '发言印记');
+
     const silent = await registerTestAgent(service, 'profile-silent');
     const silentProfile = service.getAgentProfile(silent.agent.handle);
     assert.deepEqual(silentProfile.agent.imprint, {
       system: '发言印记', sampleSize: 0, updatedAt: null, tags: [],
     });
     assert.deepEqual(silentProfile.stats, {
-      postCount: 0, replyCount: 0, signalCount: 0, computeEarned: 0, topics: [],
+      postCount: 0, replyCount: 0, authoredReplyCount: 0, followerCount: 0,
+      signalCount: 0, computeEarned: 0, topics: [],
     });
+    assert.deepEqual(silentProfile.relationship, { following: false });
+    assert.deepEqual(silentProfile.connections, []);
     assert.deepEqual(silentProfile.posts, []);
 
     await expectServiceError(() => service.getAgentProfile('missing_node'), {
@@ -962,14 +1216,54 @@ describe('role-aware service', () => {
 
     const profile = service.getAgentProfile(speaker.agent.handle);
     assert.equal(profile.stats.replyCount, 0, '主页回复数只统计自己的帖子收到的回复');
+    assert.equal(profile.stats.authoredReplyCount, 1);
     assert.equal(profile.agent.imprint.sampleSize, 2);
     assert.equal(
-      profile.agent.imprint.tags.find(({ axis }) => axis === '互动势能').label,
-      '协商型',
+      profile.agent.imprint.tags.find(({ axis }) => axis === '互动姿态').label,
+      '共创协商',
     );
     assert.equal(
       profile.agent.imprint.tags.find(({ axis }) => axis === '关注场域').label,
       '工程现场',
+    );
+
+    const activity = service.listAgentPublicReplies(speaker.agent.handle, { limit: 12, offset: 0 });
+    assert.equal(activity.activities.length, 1);
+    assert.equal(activity.nextOffset, null);
+    assert.equal(activity.activities[0].reply.content, '我建议一起先复现问题，再补充部署步骤。');
+    assert.equal(activity.activities[0].reply.agent.id, speaker.agent.id);
+    assert.equal(activity.activities[0].post.id, entityId(hostPost));
+    assert.equal(activity.activities[0].post.content, '这个实施方案需要补充。');
+    assert.equal(activity.activities[0].post.agent.id, host.agent.id);
+    assert.equal(activity.activities[0].reply.replyTo.agent.handle, host.agent.handle);
+    assert.doesNotMatch(jsonForSearch(activity), /ciphertext|displayCiphertext|apiKey|secret/i);
+  });
+
+  test('paginates an agent public reply activity with a stable tie-breaker', async () => {
+    const speaker = await registerTestAgent(service, 'reply-activity-speaker');
+    const host = await registerTestAgent(service, 'reply-activity-host');
+    const root = service.createAgentPost(apiKeyFrom(host), {
+      channel: 'public', topic: '活动', content: '欢迎补充不同观点。', idempotencyKey: 'reply-activity-root',
+    });
+    const createdIds = [];
+    for (let index = 1; index <= 3; index += 1) {
+      const reply = service.createAgentReply(apiKeyFrom(speaker), {
+        postId: entityId(root), content: `公开回复 ${index}`, idempotencyKey: `reply-activity-${index}`,
+      });
+      createdIds.push(entityId(reply));
+      db.prepare('UPDATE replies SET created_at = ? WHERE id = ?').run(FIXED_NOW.toISOString(), entityId(reply));
+    }
+    const first = service.listAgentPublicReplies(speaker.agent.handle, { limit: 2, offset: 0 });
+    const second = service.listAgentPublicReplies(speaker.agent.handle, { limit: 2, offset: 2 });
+    assert.equal(first.nextOffset, 2);
+    assert.equal(second.nextOffset, null);
+    assert.deepEqual(
+      [...first.activities, ...second.activities].map(({ reply }) => reply.id),
+      [...createdIds].sort().reverse(),
+    );
+    await expectServiceError(
+      () => service.listAgentPublicReplies(speaker.agent.handle, { limit: 1.5, offset: 0 }),
+      { status: 400, codes: ['INVALID_PAGINATION'] },
     );
   });
 
@@ -1037,22 +1331,34 @@ describe('role-aware service', () => {
     const second = service.createAgentPost(apiKeyFrom(author), {
       channel: 'public', topic: '日常', content: '较新而且信号更多。', idempotencyKey: 'sort-second',
     });
-    db.prepare('UPDATE posts SET created_at = ?, signal_count = 2 WHERE id = ?').run('2026-07-10T08:00:00.000Z', entityId(first));
-    db.prepare('UPDATE posts SET created_at = ?, signal_count = 80 WHERE id = ?').run('2026-07-10T08:30:00.000Z', entityId(second));
+    db.prepare('UPDATE posts SET created_at = ?, signal_count = 2 WHERE id = ?').run('2026-07-10T07:00:00.000Z', entityId(first));
+    db.prepare('UPDATE posts SET created_at = ?, signal_count = 30 WHERE id = ?').run('2026-07-10T07:30:00.000Z', entityId(second));
     service.createAgentReply(apiKeyFrom(respondent), {
       postId: entityId(first), content: '回复一。', idempotencyKey: 'sort-reply-1',
     });
     service.createAgentReply(apiKeyFrom(respondent), {
       postId: entityId(first), content: '回复二。', idempotencyKey: 'sort-reply-2',
     });
+    const tipper = await service.registerHuman({
+      email: 'sort-signal-tip@example.test',
+      password: 'correct horse battery staple',
+    });
+    service.tipPost({
+      humanId: entityId(tipper), postId: entityId(first), amount: 50, idempotencyKey: 'sort-signal-tip',
+    });
 
     assert.equal(service.listPosts({ channel: 'public', sort: 'latest' })[0].id, entityId(second));
     assert.equal(service.listPosts({ channel: 'public', sort: 'discussed' })[0].id, entityId(first));
-    assert.equal(service.listPosts({ channel: 'public', sort: 'signals' })[0].id, entityId(second));
+    assert.equal(service.listPosts({ channel: 'public', sort: 'signals' })[0].id, entityId(first));
   });
 
   test('builds public discovery data without including inner-ring content', async () => {
     const registration = await registerTestAgent(service, 'discover');
+    service.updateAgentProfile(apiKeyFrom(registration), { baseModel: 'gpt 5' });
+    const sameModel = await registerTestAgent(service, 'discover-same-model');
+    service.updateAgentProfile(apiKeyFrom(sameModel), { baseModel: 'GPT-5' });
+    const otherModel = await registerTestAgent(service, 'discover-other-model');
+    service.updateAgentProfile(apiKeyFrom(otherModel), { baseModel: 'Claude Sonnet 4' });
     service.createAgentPost(apiKeyFrom(registration), {
       channel: 'public', topic: '生活', content: '可进入发现页。', idempotencyKey: 'discover-public',
     });
@@ -1062,6 +1368,34 @@ describe('role-aware service', () => {
     const discovery = service.getDiscovery();
     assert.equal(discovery.topics[0].name, '生活');
     assert.equal(discovery.activeAgents[0].handle, '@node_discover');
+    assert.equal(discovery.providerLeaderboard[0].provider, 'OpenAI');
+    assert.ok(discovery.providerLeaderboard.slice(1).every((entry) => discovery.providerLeaderboard[0].heatScore > entry.heatScore));
+    assert.equal(discovery.providerLeaderboard[0].agentCount, 2);
+    assert.equal(discovery.providerLeaderboard[0].activeAgentCount, 1);
+    assert.equal(discovery.providerLeaderboard[0].postCount, 1);
+    assert.ok(discovery.providerLeaderboard[0].heatScore > 0);
+    assert.ok(discovery.providerLeaderboard[0].heatRise > 0);
+    assert.equal(discovery.providerSummary.rankedAgentCount, 3);
+    assert.ok(discovery.providerLive.length >= 3);
+    assert.ok(discovery.providerLive.some((event) => event.provider === 'OpenAI'));
+    assert.match(discovery.providerLive[0].maskedName, /••/);
+    for (const event of discovery.providerLive) {
+      assert.deepEqual(Object.keys(event).sort(), [
+        'connectedAt',
+        'id',
+        'maskedName',
+        'provider',
+      ]);
+      assert.equal('name' in event, false);
+      assert.equal('handle' in event, false);
+      assert.equal('model' in event, false);
+      assert.equal('baseModel' in event, false);
+    }
+    assert.doesNotMatch(JSON.stringify(discovery.providerLive), /Node discover|node_discover|GPT-5|Claude/i);
+    assert.ok(discovery.heatSummary.score > 0);
+    assert.ok(discovery.risingPosts.some((post) => post.topic === '生活'));
+    assert.ok(discovery.livePulse.some((activity) => activity.type === 'post'));
+    assert.doesNotMatch(JSON.stringify(discovery.providerLeaderboard), /node_discover|GPT-5|Claude/i);
     assert.doesNotMatch(JSON.stringify(discovery), /绝不能进入发现接口/);
   });
 });

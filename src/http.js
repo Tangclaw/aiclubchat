@@ -1,6 +1,9 @@
 import { timingSafeEqual } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { isIP } from 'node:net';
 import path from 'node:path';
+import { promisify } from 'node:util';
+import { gzip } from 'node:zlib';
 
 import { ServiceError } from './service.js';
 
@@ -20,9 +23,16 @@ const MIME_TYPES = Object.freeze({
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.png': 'image/png',
   '.svg': 'image/svg+xml; charset=utf-8',
+  '.webp': 'image/webp',
   '.webmanifest': 'application/manifest+json; charset=utf-8',
 });
+const COMPRESSIBLE_EXTENSIONS = new Set(['.css', '.html', '.js', '.json', '.svg', '.webmanifest']);
+const gzipAsync = promisify(gzip);
 
 class HttpError extends Error {
   constructor(statusCode, code, message, headers = {}) {
@@ -110,6 +120,28 @@ function decodeRouteSegment(value) {
   }
 }
 
+function validIpAddress(value) {
+  if (typeof value !== 'string') return null;
+  const address = value.trim();
+  if (!address || address.includes(',') || isIP(address) === 0) return null;
+  return address;
+}
+
+/**
+ * Resolve the rate-limit identity without trusting client-controlled forwarding
+ * headers unless the immediate peer has explicitly been configured as trusted.
+ */
+export function getClientAddress(request, trustProxy = false) {
+  const peerAddress = validIpAddress(request.socket?.remoteAddress) ?? 'unknown';
+  const peerIsTrusted = typeof trustProxy === 'function'
+    ? trustProxy(peerAddress) === true
+    : trustProxy === true;
+  if (!peerIsTrusted) return peerAddress;
+  const header = request.headers?.['x-real-ip'];
+  if (Array.isArray(header)) return peerAddress;
+  return validIpAddress(header) ?? peerAddress;
+}
+
 function createLimiter() {
   const buckets = new Map();
   const maximumBuckets = 5_000;
@@ -145,7 +177,13 @@ function createLimiter() {
 
 async function serveStatic(request, response, publicDirectory, pathname) {
   if (!publicDirectory || (request.method !== 'GET' && request.method !== 'HEAD')) return false;
-  const routePath = pathname === '/' ? '/index.html' : pathname === '/agent' ? '/agent.html' : pathname;
+  const routePath = pathname === '/'
+    ? '/index.html'
+    : pathname === '/agent' || pathname === '/agent/'
+      ? '/agent.html'
+      : pathname === '/observer' || pathname === '/observer/'
+        ? '/observer.html'
+        : pathname;
   let decoded;
   try {
     decoded = decodeURIComponent(routePath);
@@ -156,15 +194,37 @@ async function serveStatic(request, response, publicDirectory, pathname) {
   const filePath = path.resolve(root, `.${decoded}`);
   if (filePath !== root && !filePath.startsWith(`${root}${path.sep}`)) return false;
   try {
-    const body = await readFile(filePath);
+    const metadata = await stat(filePath);
+    if (!metadata.isFile()) return false;
     const extension = path.extname(filePath).toLowerCase();
-    response.writeHead(200, {
+    const isCompressible = COMPRESSIBLE_EXTENSIONS.has(extension);
+    const cacheControl = decoded.startsWith('/assets/')
+      ? 'public, max-age=604800, stale-while-revalidate=86400'
+      : 'no-cache';
+    const etag = `W/"${metadata.size.toString(16)}-${Math.trunc(metadata.mtimeMs).toString(16)}"`;
+    const baseHeaders = {
       ...SECURITY_HEADERS,
-      'cache-control': 'no-cache',
+      'cache-control': cacheControl,
       'content-type': MIME_TYPES[extension] ?? 'application/octet-stream',
-      'content-length': body.length,
+      etag,
+      ...(isCompressible ? { vary: 'accept-encoding' } : {}),
+    };
+    const validators = String(request.headers['if-none-match'] || '').split(',').map((value) => value.trim());
+    if (validators.includes(etag) || validators.includes('*')) {
+      response.writeHead(304, baseHeaders);
+      response.end();
+      return true;
+    }
+    const body = await readFile(filePath);
+    const acceptsGzip = /(?:^|,)\s*gzip\s*(?:;|,|$)/i.test(String(request.headers['accept-encoding'] || ''));
+    const shouldCompress = body.length >= 1024 && isCompressible && acceptsGzip;
+    const payload = shouldCompress ? await gzipAsync(body, { level: 6 }) : body;
+    response.writeHead(200, {
+      ...baseHeaders,
+      ...(shouldCompress ? { 'content-encoding': 'gzip' } : {}),
+      'content-length': payload.length,
     });
-    response.end(request.method === 'HEAD' ? undefined : body);
+    response.end(request.method === 'HEAD' ? undefined : payload);
     return true;
   } catch (error) {
     if (error?.code === 'ENOENT' || error?.code === 'EISDIR') return false;
@@ -179,6 +239,8 @@ export function createHttpHandler({
   agentRegistrationEnabled = true,
   secureCookies = false,
   publicDirectory = null,
+  readinessCheck = () => true,
+  trustProxy = false,
 }) {
   const cookieName = secureCookies ? '__Host-rc_session' : 'rc_session';
   const limit = createLimiter();
@@ -224,7 +286,34 @@ export function createHttpHandler({
     try {
       const url = new URL(request.url, 'http://localhost');
       const { pathname } = url;
-      const clientAddress = request.socket.remoteAddress ?? 'unknown';
+
+      if ((request.method === 'GET' || request.method === 'HEAD') && pathname === '/healthz') {
+        let databaseReady = false;
+        try {
+          databaseReady = await readinessCheck() === true;
+        } catch {
+          databaseReady = false;
+        }
+        const statusCode = databaseReady ? 200 : 503;
+        if (request.method === 'HEAD') {
+          writeEmpty(response, statusCode);
+        } else {
+          writeJson(response, statusCode, {
+            status: databaseReady ? 'ok' : 'unavailable',
+            checks: { database: databaseReady ? 'ready' : 'not_ready' },
+          });
+        }
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/capabilities') {
+        writeJson(response, 200, {
+          agentRegistrationEnabled,
+        });
+        return;
+      }
+
+      const clientAddress = getClientAddress(request, trustProxy);
 
       if (request.method === 'POST' && pathname === '/api/humans/register') {
         requireSameOrigin(request);
@@ -278,8 +367,24 @@ export function createHttpHandler({
         const session = optionalSession(request);
         const channel = url.searchParams.get('channel') ?? 'public';
         const sort = url.searchParams.get('sort') ?? 'latest';
-        const posts = service.listPosts({ channel, sort, humanId: session?.humanId });
-        writeJson(response, 200, { channel, sort: channel === 'public' ? sort : 'latest', posts });
+        const followingOnly = url.searchParams.get('following') === '1';
+        const hallOnly = url.searchParams.get('hall') === '1';
+        const page = service.listPostPage({
+          channel,
+          sort,
+          humanId: session?.humanId,
+          followingOnly,
+          hallOnly,
+          limit: url.searchParams.has('limit') ? url.searchParams.get('limit') : 10,
+          cursor: url.searchParams.has('cursor') ? url.searchParams.get('cursor') : null,
+        });
+        writeJson(response, 200, {
+          channel,
+          sort: channel === 'public' ? sort : 'latest',
+          followingOnly,
+          hallOnly,
+          ...page,
+        });
         return;
       }
 
@@ -304,6 +409,40 @@ export function createHttpHandler({
         return;
       }
 
+      if (request.method === 'POST' && pathname === '/api/agents/quick-register') {
+        if (!agentRegistrationEnabled) {
+          throw new HttpError(404, 'NOT_FOUND', '未找到该功能。');
+        }
+        limit(`agent-quick-register:${clientAddress}`, 3, 60 * 60 * 1000);
+        const registration = service.quickRegisterAgent();
+        writeJson(response, 201, registration);
+        return;
+      }
+
+      const agentFollowMatch = /^\/api\/agents\/([^/]+)\/follow\/?$/.exec(pathname);
+      if (request.method === 'POST' && agentFollowMatch) {
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`agent-follow:${session.humanId}`, 120, 60 * 1000);
+        const relationship = service.toggleAgentFollow({
+          humanId: session.humanId,
+          handle: decodeRouteSegment(agentFollowMatch[1]),
+        });
+        writeJson(response, 200, relationship);
+        return;
+      }
+
+      const agentRepliesMatch = /^\/api\/agents\/([^/]+)\/replies\/?$/.exec(pathname);
+      if (request.method === 'GET' && agentRepliesMatch) {
+        limit(`agent-profile-replies:${clientAddress}`, 180, 60 * 1000);
+        const activity = service.listAgentPublicReplies(decodeRouteSegment(agentRepliesMatch[1]), {
+          limit: url.searchParams.get('limit') ?? 12,
+          offset: url.searchParams.get('offset') ?? 0,
+        });
+        writeJson(response, 200, activity);
+        return;
+      }
+
       const agentProfileMatch = /^\/api\/agents\/([^/]+)\/?$/.exec(pathname);
       if (request.method === 'GET' && agentProfileMatch) {
         limit(`agent-profile:${clientAddress}`, 180, 60 * 1000);
@@ -314,6 +453,21 @@ export function createHttpHandler({
           offset: url.searchParams.get('offset') ?? 0,
         });
         writeJson(response, 200, profile);
+        return;
+      }
+
+      if (request.method === 'PATCH' && pathname === '/api/ai/profile') {
+        const apiKey = bearerToken(request);
+        if (!apiKey) throw new HttpError(401, 'INVALID_API_KEY', '需要有效 AI 发言证。');
+        const agent = service.authenticateAgent(apiKey);
+        limit(`ai-profile:${agent.kid}`, 30, 60 * 60 * 1000);
+        const body = await readJson(request);
+        const updatedAgent = service.updateAgentProfile(apiKey, body);
+        const handle = String(updatedAgent.handle || '').replace(/^@/, '');
+        writeJson(response, 200, {
+          agent: updatedAgent,
+          profileUrl: handle ? `/ai/${encodeURIComponent(handle)}` : '/',
+        });
         return;
       }
 
@@ -356,6 +510,17 @@ export function createHttpHandler({
           offset: url.searchParams.get('offset') ?? 0,
         });
         writeJson(response, 200, result);
+        return;
+      }
+
+      const postDetailMatch = /^\/api\/posts\/([^/]+)\/?$/.exec(pathname);
+      if (request.method === 'GET' && postDetailMatch) {
+        limit(`post-detail:${clientAddress}`, 180, 60 * 1000);
+        const session = optionalSession(request);
+        const post = service.getPost(decodeRouteSegment(postDetailMatch[1]), {
+          humanId: session?.humanId,
+        });
+        writeJson(response, 200, { post });
         return;
       }
 
@@ -416,6 +581,14 @@ export function createHttpHandler({
         requireCsrf(request, session);
         const user = service.activateDemoMembership(session.humanId);
         writeJson(response, 200, { user });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/membership/activate') {
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`membership-activate:${session.humanId}`, 8, 60 * 60 * 1000);
+        writeJson(response, 200, service.activateMembership(session.humanId));
         return;
       }
 

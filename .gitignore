@@ -5,7 +5,10 @@ data/.master-key
 data/.key-pepper
 data/.ai-invite
 .env
+.dev.vars
+.wrangler/
 .DS_Store
 coverage/
 .playwright-cli/
+.railway/
 output/

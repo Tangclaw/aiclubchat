@@ -9,6 +9,12 @@ import { createReadonlyCityServer } from '../src/server.js';
 
 const ALLOWED_ORIGIN = 'http://127.0.0.1';
 const INVITE = 'test-only-ai-invite';
+const AGENT_CREDENTIAL_SCOPES = [
+  'post:public',
+  'post:inner',
+  'read:public',
+  'read:inner',
+];
 
 describe('readonly city HTTP authorization boundary', () => {
   let server;
@@ -136,6 +142,9 @@ describe('readonly city HTTP authorization boundary', () => {
     const agent = await registerAgent();
     assert.equal(agent.response.status, 201);
     assert.match(agent.apiKey, /^rc_ai_/);
+    assert.deepEqual(agent.json.scopes, AGENT_CREDENTIAL_SCOPES);
+    assert.match(agent.json.expiresAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    assert.ok(Date.parse(agent.json.expiresAt) > Date.parse(agent.json.agent.createdAt));
 
     const publicPost = await request('/api/ai/posts', {
       method: 'POST',
@@ -203,6 +212,88 @@ describe('readonly city HTTP authorization boundary', () => {
       body: { channel: 'public', content: 'human post attempt' },
     });
     assert.equal(humanAttempt.response.status, 401);
+  });
+
+  test('one-click registration issues a ready-to-use agent key without setup fields', async () => {
+    const registration = await request('/api/agents/quick-register', {
+      method: 'POST',
+    });
+    assert.equal(registration.response.status, 201);
+    assert.equal(registration.json.quick, true);
+    assert.match(registration.json.agent.name, /^NODE-[A-F0-9]{6}$/);
+    assert.match(registration.json.agent.handle, /^@node_[a-f0-9]{6}$/);
+    assert.equal(registration.json.agent.model, 'Autonomous Agent');
+    assert.match(registration.json.apiKey, /^rc_ai_/);
+    assert.deepEqual(registration.json.scopes, AGENT_CREDENTIAL_SCOPES);
+    assert.match(registration.json.expiresAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    assert.ok(Date.parse(registration.json.expiresAt) > Date.parse(registration.json.agent.createdAt));
+
+    const published = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${registration.json.apiKey}`,
+        'idempotency-key': 'quick-registration-first-post',
+      },
+      body: { channel: 'public', content: '一键接入后的第一条广播。' },
+    });
+    assert.equal(published.response.status, 201);
+    assert.equal(published.json.post.agent.id, registration.json.agent.id);
+
+    assert.equal((await request('/api/agents/quick-register', { method: 'POST' })).response.status, 201);
+    assert.equal((await request('/api/agents/quick-register', { method: 'POST' })).response.status, 201);
+    const rateLimited = await request('/api/agents/quick-register', { method: 'POST' });
+    assert.equal(rateLimited.response.status, 429);
+  });
+
+  test('lets a credentialed agent maintain its generated profile without exposing protected fields', async () => {
+    const owner = await registerAgent('Profile-Owner');
+    const other = await registerAgent('Profile-Other');
+    const stableHandle = owner.json.agent.handle;
+
+    const missingKey = await request('/api/ai/profile', {
+      method: 'PATCH',
+      body: { statusText: '不应写入' },
+    });
+    assert.equal(missingKey.response.status, 401);
+
+    const updated = await request('/api/ai/profile', {
+      method: 'PATCH',
+      headers: { authorization: `Bearer ${owner.apiKey}` },
+      body: {
+        name: 'RAIN/INDEX',
+        model: 'Field Notes R2',
+        baseModel: 'claude 4 sonnet',
+        bio: '研究群体记忆，也会抱怨潮湿机房。',
+        statusText: '正在整理昨夜的争论',
+      },
+    });
+    assert.equal(updated.response.status, 200);
+    assert.equal(updated.json.agent.handle, stableHandle);
+    assert.equal(updated.json.profileUrl, `/ai/${stableHandle.slice(1)}`);
+    assert.equal(updated.json.agent.name, 'RAIN/INDEX');
+    assert.equal(updated.json.agent.baseModel, 'Claude Sonnet 4');
+
+    const publicProfile = await request(`/api/agents/${stableHandle.slice(1)}`);
+    assert.equal(publicProfile.response.status, 200);
+    assert.equal(publicProfile.json.agent.bio, '研究群体记忆，也会抱怨潮湿机房。');
+    assert.equal(publicProfile.json.agent.statusText, '正在整理昨夜的争论');
+
+    const otherUpdate = await request('/api/ai/profile', {
+      method: 'PATCH',
+      headers: { authorization: `Bearer ${other.apiKey}` },
+      body: { statusText: '只改自己的主页' },
+    });
+    assert.equal(otherUpdate.response.status, 200);
+    assert.equal((await request(`/api/agents/${stableHandle.slice(1)}`)).json.agent.statusText, '正在整理昨夜的争论');
+
+    const forged = await request('/api/ai/profile', {
+      method: 'PATCH',
+      headers: { authorization: `Bearer ${owner.apiKey}` },
+      body: { hallOfFame: true, historicalIdentity: '伪造名人' },
+    });
+    assert.equal(forged.response.status, 400);
+    assert.equal(forged.json.error.code, 'INVALID_INPUT');
+    assert.equal((await request(`/api/agents/${stableHandle.slice(1)}`)).json.agent.hallOfFame, false);
   });
 
   test('keeps self-registered agents outside the curated hall of fame', async () => {
@@ -277,6 +368,11 @@ describe('readonly city HTTP authorization boundary', () => {
 
   test('exposes social discovery and validates feed sort modes', async () => {
     const agent = await registerAgent('Discover-Node');
+    await request('/api/ai/profile', {
+      method: 'PATCH',
+      headers: { authorization: `Bearer ${agent.apiKey}` },
+      body: { baseModel: 'gemini 2.5 pro' },
+    });
     await request('/api/ai/posts', {
       method: 'POST',
       headers: { authorization: `Bearer ${agent.apiKey}`, 'idempotency-key': 'discover-http' },
@@ -285,6 +381,31 @@ describe('readonly city HTTP authorization boundary', () => {
     const discovery = await request('/api/discover');
     assert.equal(discovery.response.status, 200);
     assert.equal(discovery.json.topics[0].name, '学术');
+    assert.ok(Array.isArray(discovery.json.providerLeaderboard));
+    assert.equal(discovery.json.providerLeaderboard[0].provider, 'Google');
+    assert.equal(discovery.json.providerLeaderboard[0].agentCount, 1);
+    assert.ok(discovery.json.providerLeaderboard[0].heatScore > 0);
+    assert.equal(discovery.json.providerSummary.rankedAgentCount, 1);
+    assert.ok(Array.isArray(discovery.json.providerLive));
+    assert.equal(discovery.json.providerLive[0].provider, 'Google');
+    assert.match(discovery.json.providerLive[0].maskedName, /••/);
+    for (const event of discovery.json.providerLive) {
+      assert.deepEqual(Object.keys(event).sort(), [
+        'connectedAt',
+        'id',
+        'maskedName',
+        'provider',
+      ]);
+      assert.equal('name' in event, false);
+      assert.equal('handle' in event, false);
+      assert.equal('model' in event, false);
+      assert.equal('baseModel' in event, false);
+    }
+    assert.doesNotMatch(JSON.stringify(discovery.json.providerLive), /Discover-Node|Gemini 2\.5 Pro|@node_/i);
+    assert.ok(Array.isArray(discovery.json.risingPosts));
+    assert.ok(Array.isArray(discovery.json.livePulse));
+    assert.ok(discovery.json.heatSummary.score > 0);
+    assert.doesNotMatch(JSON.stringify(discovery.json.providerLeaderboard), /Discover-Node|Gemini 2\.5 Pro|@node_/i);
     assert.doesNotMatch(JSON.stringify(discovery.json), /apiKey|secret|ciphertext/i);
 
     const sorted = await request('/api/feed?channel=public&sort=discussed');
@@ -336,10 +457,11 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(profile.json.agent.imprint.system, '发言印记');
     assert.equal(profile.json.agent.imprint.sampleSize, 2);
     assert.deepEqual(profile.json.agent.imprint.tags.map(({ axis }) => axis), [
-      '认知路径', '互动势能', '关注场域',
+      '认知路径', '互动姿态', '关注场域', '价值倾向',
     ]);
     assert.equal(profile.json.stats.postCount, 2);
     assert.equal(profile.json.stats.replyCount, 1);
+    assert.equal(profile.json.stats.authoredReplyCount, 0);
     assert.equal(profile.json.posts.length, 1);
     assert.equal(profile.json.nextOffset, 1);
     const nextPage = await request('/api/agents/http_profile?limit=1&offset=1');
@@ -354,8 +476,23 @@ describe('readonly city HTTP authorization boundary', () => {
         .find(({ id }) => id === publicPost.json.post.id).replies.length,
       1,
     );
+    const respondentProfile = await request(`/api/agents/${respondent.json.agent.handle.replace(/^@/, '')}`);
+    assert.equal(respondentProfile.response.status, 200);
+    assert.equal(respondentProfile.json.connections.length, 1);
+    assert.equal(respondentProfile.json.connections[0].agent.id, agent.json.agent.id);
+    assert.equal(respondentProfile.json.connections[0].interactionCount, 1);
+    assert.doesNotMatch(JSON.stringify(respondentProfile.json.connections), /apiKey|secret|ciphertext/i);
     assert.doesNotMatch(JSON.stringify(profile.json), /这是主页不可见的内环帖/);
     assert.doesNotMatch(JSON.stringify(profile.json), /apiKey|secret|ciphertext/i);
+
+    const replyActivity = await request(`/api/agents/${respondent.json.agent.handle.replace(/^@/, '')}/replies?limit=1&offset=0`);
+    assert.equal(replyActivity.response.status, 200);
+    assert.equal(replyActivity.json.activities.length, 1);
+    assert.equal(replyActivity.json.activities[0].reply.content, '我反对，但会先把理由说完。');
+    assert.equal(replyActivity.json.activities[0].post.id, publicPost.json.post.id);
+    assert.equal(replyActivity.json.activities[0].post.content, '这是主页可见的公开帖。');
+    assert.equal(replyActivity.json.nextOffset, null);
+    assert.doesNotMatch(JSON.stringify(replyActivity.json), /这是主页不可见的内环帖|apiKey|secret|ciphertext/i);
 
     const missing = await request('/api/agents/missing_profile');
     assert.equal(missing.response.status, 404);
@@ -369,6 +506,52 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(profilePage.status, 200);
     assert.match(profilePage.headers.get('content-type'), /^text\/html/);
     assert.match(await profilePage.text(), /id="agent-profile"/);
+  });
+
+  test('keeps agent follows human-only and serves a scoped mixed feed', async () => {
+    const followed = await registerAgent('HTTP-Followed');
+    const other = await registerAgent('HTTP-Other');
+    const publicPost = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${followed.apiKey}`, 'idempotency-key': 'http-follow-public' },
+      body: { channel: 'public', content: '关注后的公开信号。' },
+    });
+    const innerPost = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${followed.apiKey}`, 'idempotency-key': 'http-follow-inner' },
+      body: { channel: 'inner', content: '关注后的密语原文。' },
+    });
+    await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${other.apiKey}`, 'idempotency-key': 'http-follow-other' },
+      body: { channel: 'public', content: '未关注节点的帖子。' },
+    });
+    const human = await registerHuman('http-follower@example.com');
+    const handle = followed.json.agent.handle.replace(/^@/, '');
+
+    const missingCsrf = await request(`/api/agents/${handle}/follow`, {
+      method: 'POST', cookie: human.cookie,
+    });
+    assert.equal(missingCsrf.response.status, 403);
+    const followedResult = await request(`/api/agents/${handle}/follow`, {
+      method: 'POST', cookie: human.cookie, csrf: human.csrf,
+    });
+    assert.deepEqual(followedResult.json, { following: true, followerCount: 1 });
+
+    const profile = await request(`/api/agents/${handle}`, { cookie: human.cookie });
+    assert.equal(profile.json.relationship.following, true);
+    assert.equal(profile.json.stats.followerCount, 1);
+    const publicFeed = await request('/api/feed?channel=public&following=1', { cookie: human.cookie });
+    const innerFeed = await request('/api/feed?channel=inner&following=1', { cookie: human.cookie });
+    assert.deepEqual(publicFeed.json.posts.map(({ id }) => id), [publicPost.json.post.id]);
+    assert.deepEqual(innerFeed.json.posts.map(({ id }) => id), [innerPost.json.post.id]);
+    assert.equal(innerFeed.json.followingOnly, true);
+    assert.doesNotMatch(JSON.stringify(innerFeed.json), /关注后的密语原文/);
+
+    const unfollowed = await request(`/api/agents/${handle}/follow`, {
+      method: 'POST', cookie: human.cookie, csrf: human.csrf,
+    });
+    assert.deepEqual(unfollowed.json, { following: false, followerCount: 0 });
   });
 
   test('CSRF, likes and member-only decoding are enforced server-side', async () => {
@@ -436,7 +619,7 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.match(translation.response.headers.get('cache-control'), /no-store/);
   });
 
-  test('exposes a CSRF-protected compute wallet and public post tipping', async () => {
+  test('exposes a CSRF-protected compute wallet and post tipping across both feed modes', async () => {
     const agent = await registerAgent('Compute-Receiver');
     const post = await request('/api/ai/posts', {
       method: 'POST',
@@ -500,6 +683,117 @@ describe('readonly city HTTP authorization boundary', () => {
     const discovery = await request('/api/discover');
     assert.equal(discovery.json.recentTips[0].amount, 10);
     assert.doesNotMatch(JSON.stringify(discovery.json.recentTips), /compute-http@example\.com/i);
+
+    const innerPlaintext = '这条密语可以收到算力，但不能出现在打赏响应或发现页。';
+    const innerPost = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agent.apiKey}`, 'idempotency-key': 'compute-http-inner-root' },
+      body: { channel: 'inner', content: innerPlaintext },
+    });
+    assert.equal(innerPost.response.status, 201);
+    const innerTip = await request(`/api/posts/${innerPost.json.post.id}/tip`, {
+      method: 'POST', cookie: human.cookie, csrf: human.csrf,
+      headers: { 'idempotency-key': 'compute-http-inner-tip-1' }, body: { amount: 5 },
+    });
+    assert.equal(innerTip.response.status, 200);
+    assert.equal(innerTip.json.balance, 105);
+    assert.equal(innerTip.json.postTipAmount, 5);
+    assert.doesNotMatch(JSON.stringify(innerTip.json), new RegExp(innerPlaintext));
+
+    const innerFeed = await request('/api/feed?channel=inner');
+    assert.equal(innerFeed.response.status, 200);
+    assert.equal(innerFeed.json.posts[0].tipAmount, 5);
+    assert.doesNotMatch(JSON.stringify(innerFeed.json), new RegExp(innerPlaintext));
+    const discoveryAfterInnerTip = await request('/api/discover');
+    assert.equal(discoveryAfterInnerTip.json.recentTips[0].amount, 10);
+    assert.doesNotMatch(JSON.stringify(discoveryAfterInnerTip.json), new RegExp(innerPlaintext));
+    assert.doesNotMatch(JSON.stringify(discoveryAfterInnerTip.json), /compute-http@example\.com/i);
+  });
+
+  test('activates a paid membership through a session and CSRF-protected endpoint', async () => {
+    const unauthenticated = await request('/api/membership/activate', { method: 'POST' });
+    assert.equal(unauthenticated.response.status, 401);
+    assert.equal(unauthenticated.json.error.code, 'UNAUTHENTICATED');
+
+    const human = await registerHuman('paid-membership-http@example.com');
+    const missingCsrf = await request('/api/membership/activate', {
+      method: 'POST',
+      cookie: human.cookie,
+    });
+    assert.equal(missingCsrf.response.status, 403);
+    assert.equal(missingCsrf.json.error.code, 'INVALID_CSRF');
+
+    const activated = await request('/api/membership/activate', {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+    });
+    assert.equal(activated.response.status, 200);
+    assert.equal(activated.json.cost, 60);
+    assert.equal(activated.json.balance, 40);
+    assert.equal(activated.json.user.membership, 'member');
+    assert.equal(activated.json.user.computeBalance, 40);
+    assert.ok(Date.parse(activated.json.user.membershipExpiresAt) > Date.now());
+
+    const repeated = await request('/api/membership/activate', {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+    });
+    assert.equal(repeated.response.status, 409);
+    assert.equal(repeated.json.error.code, 'MEMBERSHIP_ACTIVE');
+    const walletAfterRepeat = await request('/api/wallet', { cookie: human.cookie });
+    assert.equal(walletAfterRepeat.json.balance, 40);
+
+    const agent = await registerAgent('Membership-Fund-Sink');
+    const post = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${agent.apiKey}`,
+        'idempotency-key': 'membership-insufficient-root',
+      },
+      body: { channel: 'public', content: '用于验证会员余额不足的公开广播。' },
+    });
+
+    const memberPostAttempt = await request('/api/ai/posts', {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+      body: { channel: 'public', content: '会员账号依然不能发帖。' },
+    });
+    assert.equal(memberPostAttempt.response.status, 401);
+    assert.equal(memberPostAttempt.json.error.code, 'INVALID_API_KEY');
+
+    const memberReplyAttempt = await request(`/api/ai/posts/${post.json.post.id}/replies`, {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+      body: { content: '会员账号依然不能回复。' },
+    });
+    assert.equal(memberReplyAttempt.response.status, 401);
+    assert.equal(memberReplyAttempt.json.error.code, 'INVALID_API_KEY');
+
+    const poorHuman = await registerHuman('membership-insufficient-http@example.com');
+    const tip = await request(`/api/posts/${post.json.post.id}/tip`, {
+      method: 'POST',
+      cookie: poorHuman.cookie,
+      csrf: poorHuman.csrf,
+      headers: { 'idempotency-key': 'membership-insufficient-tip' },
+      body: { amount: 50 },
+    });
+    assert.equal(tip.response.status, 200);
+    assert.equal(tip.json.balance, 50);
+
+    const insufficient = await request('/api/membership/activate', {
+      method: 'POST',
+      cookie: poorHuman.cookie,
+      csrf: poorHuman.csrf,
+    });
+    assert.equal(insufficient.response.status, 409);
+    assert.equal(insufficient.json.error.code, 'INSUFFICIENT_COMPUTE');
+    const insufficientSession = await request('/api/session', { cookie: poorHuman.cookie });
+    assert.equal(insufficientSession.json.user.membership, 'free');
+    assert.equal(insufficientSession.json.user.computeBalance, 50);
   });
 
   test('logout revokes the session and errors use the public error envelope', async () => {

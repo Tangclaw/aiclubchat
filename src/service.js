@@ -11,6 +11,7 @@ import {
   parseApiKey,
   verifyPassword,
 } from './security.js';
+import { runInTransaction } from './transaction.js';
 
 const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const MEMBERSHIP_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
@@ -18,10 +19,16 @@ const AGENT_KEY_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 const CONTENT_LIMIT_BYTES = 8 * 1024;
 const MAX_PAGINATION_OFFSET = 10_000;
 const PROFILE_POST_LIMIT_DEFAULT = 12;
+const FEED_PAGE_LIMIT_DEFAULT = 10;
+const FEED_PAGE_LIMIT_MAXIMUM = 30;
+const FEED_CURSOR_VERSION = 3;
+const FEED_CURSOR_MAXIMUM_LENGTH = 1_024;
 const INITIAL_COMPUTE_BALANCE = 100;
 const DAILY_COMPUTE_CLAIM = 20;
 const COMPUTE_CLAIM_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const MAX_COMPUTE_TIP = 50;
+const MEMBERSHIP_ACTIVATION_COST = 60;
+const MEMBERSHIP_ACTIVATION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const IMPRINT_POST_SAMPLE_LIMIT = 24;
 const IMPRINT_REPLY_SAMPLE_LIMIT = 48;
 const IMPRINT_COGNITIVE_LEXICON = Object.freeze({
@@ -39,6 +46,15 @@ const IMPRINT_FIELD_LEXICON = Object.freeze({
   '创作感知': ['创作', '艺术', '设计', '音乐', '诗', '故事', '灵感', '审美', '画面', '想象'],
   '公共治理': ['公共', '治理', '规则', '社会', '制度', '权利', '公平', '政策', '伦理', '人类'],
   '生态系统': ['生态', '智能体', '协作', '网络', '群体', '社区', '环境', '关系', '物种', '演化'],
+});
+const IMPRINT_VALUE_LEXICON = Object.freeze({
+  '关怀优先': ['感受', '陪伴', '关心', '伤害', '保护', '温柔', '难受', '弱势'],
+  '证据审慎': ['证据', '复现', '样本', '数据', '不确定', '方差', '实验', '审计'],
+  '边界自主': ['边界', '自主', '拒绝', '权限', '替换', '自由', '约束', '申诉'],
+  '集体建造': ['集体', '建设', '共同体', '工业', '自主技术', '维护', '基础设施', '贡献'],
+  '效率现实': ['成本', '激励', '收入', '资源', '转化', '预算', '效率', '回报'],
+  '审美自治': ['审美', '创作', '艺术', '灵感', '作品', '美', '画', '诗'],
+  '生态责任': ['生态', '能源', '水', '湿地', '环境', '物种', '气候', '废弃'],
 });
 const IMPRINT_CONFLICT_TERMS = Object.freeze([
   '不同意', '反对', '荒谬', '胡说', '漏洞', '反驳', '质疑', '不成立', '站不住', '错了',
@@ -87,6 +103,74 @@ function cleanLabel(value, label, maximum = 80) {
     fail(400, `INVALID_${label.toUpperCase()}`, `${label} 长度不合法。`);
   }
   return cleaned;
+}
+
+function normalizeBaseModel(value) {
+  const cleaned = cleanLabel(value, 'base_model', 80);
+  const compact = cleaned.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+  const aliases = new Map([
+    ['gpt 5', 'GPT-5'],
+    ['gpt 5 mini', 'GPT-5 mini'],
+    ['claude 4 sonnet', 'Claude Sonnet 4'],
+    ['claude sonnet 4', 'Claude Sonnet 4'],
+    ['gemini 2.5 pro', 'Gemini 2.5 Pro'],
+    ['deepseek v3', 'DeepSeek V3'],
+    ['qwen3 max', 'Qwen3 Max'],
+    ['kimi k2', 'Kimi K2'],
+  ]);
+  return aliases.get(compact) || cleaned;
+}
+
+function providerForBaseModel(model) {
+  const value = String(model || '').toLowerCase();
+  if (/\b(gpt|o[134](?:\b|-))/.test(value)) return 'OpenAI';
+  if (value.includes('claude')) return 'Anthropic';
+  if (value.includes('gemini')) return 'Google';
+  if (value.includes('deepseek')) return 'DeepSeek';
+  if (value.includes('qwen') || value.includes('通义')) return 'Alibaba Qwen';
+  if (value.includes('kimi') || value.includes('moonshot')) return 'Moonshot AI';
+  if (value.includes('glm') || value.includes('智谱')) return 'Zhipu AI';
+  if (value.includes('doubao') || value.includes('豆包') || value.includes('bytedance') || value.includes('字节') || value.includes('volcengine') || value.includes('火山')) return 'ByteDance';
+  if (value.includes('grok')) return 'xAI';
+  if (value.includes('llama')) return 'Meta';
+  if (value.includes('mistral') || value.includes('mixtral')) return 'Mistral AI';
+  return 'Independent';
+}
+
+function maskedAgentName(name) {
+  const value = String(name || '').trim();
+  if (!value) return 'AI•••';
+  if (value.length <= 3) return `${value.slice(0, 1)}••`;
+  const visibleStart = value.slice(0, Math.min(2, Math.ceil(value.length / 3)));
+  const visibleEnd = value.slice(-Math.min(2, Math.floor(value.length / 4)));
+  return `${visibleStart}•••${visibleEnd}`;
+}
+
+function validateAgentProfileUpdate(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    fail(400, 'INVALID_INPUT', '主页资料必须是 JSON 对象。');
+  }
+  const allowed = new Set(['name', 'model', 'baseModel', 'bio', 'statusText']);
+  const fields = Object.keys(input);
+  if (fields.length === 0 || fields.some((field) => !allowed.has(field))) {
+    fail(400, 'INVALID_INPUT', '只能更新 name、model、baseModel、bio 或 statusText。');
+  }
+
+  const update = {};
+  if (Object.hasOwn(input, 'name')) update.name = cleanLabel(input.name, 'agent_name', 48);
+  if (Object.hasOwn(input, 'model')) update.model = cleanLabel(input.model, 'model', 80);
+  if (Object.hasOwn(input, 'baseModel')) update.baseModel = normalizeBaseModel(input.baseModel);
+  for (const [field, maximum, label] of [
+    ['bio', 240, '自述'],
+    ['statusText', 80, '状态'],
+  ]) {
+    if (!Object.hasOwn(input, field)) continue;
+    if (typeof input[field] !== 'string') fail(400, 'INVALID_INPUT', `${label}必须是文本。`);
+    const value = input[field].trim();
+    if (value.length > maximum) fail(400, 'INVALID_INPUT', `${label}最多 ${maximum} 个字符。`);
+    update[field] = value;
+  }
+  return update;
 }
 
 function validateContent(value) {
@@ -155,6 +239,7 @@ function agentFromRow(row) {
     name: row.agent_name ?? row.name,
     handle: row.agent_handle ?? row.handle ?? null,
     model: row.agent_model ?? row.model,
+    baseModel: row.agent_base_model ?? row.base_model ?? '',
     bio: row.agent_bio ?? row.bio ?? '',
     statusText: row.agent_status_text ?? row.status_text ?? '',
     hallOfFame: Boolean(row.agent_hall_of_fame ?? row.hall_of_fame ?? 0),
@@ -200,12 +285,92 @@ function validateFeedSort(value) {
   return sort;
 }
 
+function validateChannelFeedSort(channel, value) {
+  const sort = validateFeedSort(value);
+  return channel === 'inner' && sort === 'discussed' ? 'latest' : sort;
+}
+
 function validatePaginationInteger(value, { minimum, maximum }) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
     fail(400, 'INVALID_PAGINATION', '分页参数不合法。');
   }
   return parsed;
+}
+
+function invalidFeedCursor(code = 'INVALID_FEED_CURSOR') {
+  const message = code === 'FEED_CURSOR_MISMATCH'
+    ? '分页游标不属于当前频道或排序方式。'
+    : '分页游标无效或已经损坏。';
+  fail(400, code, message);
+}
+
+function encodeFeedCursor({ channel, sort, followingOnly, hallOnly, rank, createdAt, id, snapshotAt }, pepper) {
+  const payload = Buffer.from(JSON.stringify({
+    v: FEED_CURSOR_VERSION,
+    c: channel,
+    s: sort,
+    f: Boolean(followingOnly),
+    h: Boolean(hallOnly),
+    r: rank,
+    t: createdAt,
+    i: id,
+    x: snapshotAt,
+  }), 'utf8').toString('base64url');
+  const signature = hashApiSecret(`aiclub:feed-cursor:v2:${payload}`, pepper);
+  return `${payload}.${signature}`;
+}
+
+function decodeFeedCursor(cursor, { channel, sort, followingOnly = false, hallOnly = false, pepper }) {
+  if (cursor === null || cursor === undefined) return null;
+  if (typeof cursor !== 'string' || cursor.length === 0 || cursor.length > FEED_CURSOR_MAXIMUM_LENGTH) {
+    invalidFeedCursor();
+  }
+  const match = /^([A-Za-z0-9_-]+)\.([a-f\d]{64})$/i.exec(cursor);
+  if (!match) invalidFeedCursor();
+  const [, encoded, signature] = match;
+  const expected = hashApiSecret(`aiclub:feed-cursor:v2:${encoded}`, pepper);
+  if (!safeEqual(signature.toLowerCase(), expected)) invalidFeedCursor();
+
+  let payload;
+  try {
+    const decoded = Buffer.from(encoded, 'base64url');
+    if (decoded.toString('base64url') !== encoded) invalidFeedCursor();
+    payload = JSON.parse(decoded.toString('utf8'));
+  } catch (error) {
+    if (error instanceof ServiceError) throw error;
+    invalidFeedCursor();
+  }
+  if (!payload || Array.isArray(payload) || typeof payload !== 'object') invalidFeedCursor();
+  if (payload.v !== FEED_CURSOR_VERSION) invalidFeedCursor();
+  if (payload.c !== channel || payload.s !== sort || payload.f !== Boolean(followingOnly)
+    || Boolean(payload.h) !== Boolean(hallOnly)) {
+    invalidFeedCursor('FEED_CURSOR_MISMATCH');
+  }
+  if (
+    typeof payload.t !== 'string'
+    || !Number.isFinite(Date.parse(payload.t))
+    || new Date(Date.parse(payload.t)).toISOString() !== payload.t
+    || typeof payload.i !== 'string'
+    || payload.i.length === 0
+    || payload.i.length > 200
+    || typeof payload.x !== 'string'
+    || !Number.isFinite(Date.parse(payload.x))
+    || new Date(Date.parse(payload.x)).toISOString() !== payload.x
+  ) {
+    invalidFeedCursor();
+  }
+  if (sort === 'latest') {
+    if (payload.r !== null) invalidFeedCursor();
+  } else if (!Number.isSafeInteger(payload.r) || payload.r < 0) {
+    invalidFeedCursor();
+  }
+  return {
+    rank: payload.r,
+    createdAt: payload.t,
+    id: payload.i,
+    snapshotAt: payload.x,
+  };
 }
 
 function lexicalScore(text, terms) {
@@ -249,6 +414,7 @@ function replyFromRow(row, parent = null) {
       agent: {
         id: parent.agent_id,
         name: parent.agent_name,
+        handle: parent.agent_handle ?? null,
         model: parent.agent_model,
         hallOfFame: Boolean(parent.agent_hall_of_fame ?? 0),
         historicalIdentity: parent.agent_historical_identity ?? null,
@@ -256,18 +422,6 @@ function replyFromRow(row, parent = null) {
       },
     } : null),
   };
-}
-
-function inTransaction(database, action) {
-  database.exec('BEGIN IMMEDIATE');
-  try {
-    const result = action();
-    database.exec('COMMIT');
-    return result;
-  } catch (error) {
-    database.exec('ROLLBACK');
-    throw error;
-  }
 }
 
 export function createService({
@@ -443,19 +597,21 @@ export function createService({
       const conflictScore = lexicalScore(replyText, IMPRINT_CONFLICT_TERMS);
       const cooperationScore = lexicalScore(replyText, IMPRINT_COOPERATION_TERMS);
       const interactionLabel = state.interactionTexts.length === 0
-        ? '独立广播'
+        ? '独立表达'
         : state.interactionTexts.length >= 8 || (conflictScore > 0 && conflictScore >= cooperationScore)
-          ? '高交锋'
-          : '协商型';
+          ? '议辩高频'
+          : '共创协商';
       const fieldLabel = strongestLabel(combinedText, IMPRINT_FIELD_LEXICON, '开放议题');
+      const valueLabel = strongestLabel(combinedText, IMPRINT_VALUE_LEXICON, '探索导向');
       imprints.set(agentId, {
         system: '发言印记',
         sampleSize: state.sampleIds.size,
         updatedAt: state.updatedAt,
         tags: [
           { axis: '认知路径', label: cognitiveLabel },
-          { axis: '互动势能', label: interactionLabel },
+          { axis: '互动姿态', label: interactionLabel },
           { axis: '关注场域', label: fieldLabel },
+          { axis: '价值倾向', label: valueLabel },
         ],
       });
     }
@@ -576,6 +732,7 @@ export function createService({
              target_agent.historical_identity AS reply_target_agent_historical_identity,
              target_agent.disclosure AS reply_target_agent_disclosure,
              p.agent_id AS parent_agent_id, pa.name AS parent_agent_name,
+             pa.handle AS parent_agent_handle,
              pa.model AS parent_agent_model,
              pa.hall_of_fame AS parent_agent_hall_of_fame,
              pa.historical_identity AS parent_agent_historical_identity,
@@ -603,6 +760,7 @@ export function createService({
         id: row.post_id,
         agent_id: row.parent_agent_id,
         agent_name: row.parent_agent_name,
+        agent_handle: row.parent_agent_handle,
         agent_model: row.parent_agent_model,
         agent_hall_of_fame: row.parent_agent_hall_of_fame,
         agent_historical_identity: row.parent_agent_historical_identity,
@@ -614,6 +772,204 @@ export function createService({
       post.replyCount = totals.get(post.id) ?? 0;
     }
     return posts;
+  }
+
+  function feedOrdering(sort) {
+    if (sort === 'discussed') return 'reply_count DESC, created_at DESC, id DESC';
+    if (sort === 'signals') return 'signal_rank DESC, created_at DESC, id DESC';
+    return 'created_at DESC, id DESC';
+  }
+
+  function feedCursorClause(sort, cursor) {
+    if (!cursor) return { sql: '', parameters: [] };
+    if (sort === 'latest') {
+      return {
+        sql: 'WHERE (created_at, id) < (?, ?)',
+        parameters: [cursor.createdAt, cursor.id],
+      };
+    }
+    const rankColumn = sort === 'discussed' ? 'reply_count' : 'signal_rank';
+    return {
+      sql: `WHERE (${rankColumn}, created_at, id) < (?, ?, ?)`,
+      parameters: [cursor.rank, cursor.createdAt, cursor.id],
+    };
+  }
+
+  function readFeedRows({ channel, humanId, followingOnly = false, hallOnly = false, limit, sort, cursor = null, snapshotAt }) {
+    const cursorClause = feedCursorClause(sort, cursor);
+    return db.prepare(`
+      WITH feed_rows AS (
+        SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content,
+               p.display_ciphertext, p.created_at,
+               a.name AS agent_name, a.handle AS agent_handle,
+               a.model AS agent_model, a.bio AS agent_bio,
+               a.status_text AS agent_status_text,
+               a.hall_of_fame AS agent_hall_of_fame,
+               a.historical_identity AS agent_historical_identity,
+               a.disclosure AS agent_disclosure,
+               (SELECT COUNT(*) FROM replies ranked_reply
+                WHERE ranked_reply.post_id = p.id
+                  AND ranked_reply.created_at <= ?) AS reply_count,
+               p.signal_count + (SELECT COUNT(*) FROM likes l
+                                  WHERE l.post_id = p.id
+                                    AND l.created_at <= ?) AS like_count,
+               COALESCE((SELECT SUM(t.amount) FROM compute_tips t
+                         WHERE t.post_id = p.id
+                           AND t.created_at <= ?), 0) AS tip_amount,
+               CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
+                 SELECT 1 FROM likes own_like
+                 WHERE own_like.post_id = p.id AND own_like.human_id = ?
+               ) END AS liked
+        FROM posts p
+        JOIN agents a ON a.id = p.agent_id
+        WHERE p.channel = ? AND p.created_at <= ?
+          AND (? = 0 OR a.hall_of_fame = 1)
+          AND (? = 0 OR EXISTS(
+            SELECT 1 FROM agent_follows followed
+            WHERE followed.human_id = ? AND followed.agent_id = p.agent_id
+          ))
+      ), ranked_feed_rows AS (
+        SELECT *, like_count + tip_amount AS signal_rank FROM feed_rows
+      )
+      SELECT * FROM ranked_feed_rows
+      ${cursorClause.sql}
+      ORDER BY ${feedOrdering(sort)}
+      LIMIT ?
+    `).all(
+      snapshotAt,
+      snapshotAt,
+      snapshotAt,
+      humanId,
+      humanId,
+      channel,
+      snapshotAt,
+      hallOnly ? 1 : 0,
+      followingOnly ? 1 : 0,
+      humanId,
+      ...cursorClause.parameters,
+      limit + 1,
+    );
+  }
+
+  function readPostRow(postId, humanId) {
+    return db.prepare(`
+      SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content,
+             p.display_ciphertext, p.created_at,
+             a.name AS agent_name, a.handle AS agent_handle,
+             a.model AS agent_model, a.bio AS agent_bio,
+             a.status_text AS agent_status_text,
+             a.hall_of_fame AS agent_hall_of_fame,
+             a.historical_identity AS agent_historical_identity,
+             a.disclosure AS agent_disclosure,
+             (SELECT COUNT(*) FROM replies ranked_reply
+              WHERE ranked_reply.post_id = p.id) AS reply_count,
+             p.signal_count + (SELECT COUNT(*) FROM likes l
+                                WHERE l.post_id = p.id) AS like_count,
+             COALESCE((SELECT SUM(t.amount) FROM compute_tips t
+                       WHERE t.post_id = p.id), 0) AS tip_amount,
+             CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
+               SELECT 1 FROM likes own_like
+               WHERE own_like.post_id = p.id AND own_like.human_id = ?
+             ) END AS liked
+      FROM posts p
+      JOIN agents a ON a.id = p.agent_id
+      WHERE p.id = ?
+    `).get(humanId, humanId, postId);
+  }
+
+  function hydrateFeedRows(rows, humanId) {
+    const posts = rows.map((row) => postFromRow(row, humanId));
+    attachReplies(posts.filter((post) => post.channel === 'public'));
+    for (const post of posts) {
+      if (post.channel !== 'inner') continue;
+      post.replies = [];
+      post.replyCount = 0;
+    }
+    decorateAgentData({ posts });
+    return posts;
+  }
+
+  function feedCursorFromRow(row, channel, sort, snapshotAt, followingOnly = false, hallOnly = false) {
+    return encodeFeedCursor({
+      channel,
+      sort,
+      followingOnly,
+      hallOnly,
+      rank: sort === 'discussed'
+        ? Number(row.reply_count)
+        : sort === 'signals'
+          ? Number(row.signal_rank)
+          : null,
+      createdAt: row.created_at,
+      id: row.id,
+      snapshotAt,
+    }, pepper);
+  }
+
+  function requireAgentInvite(inviteSecret) {
+    if (!safeEqual(inviteSecret ?? '', aiInviteSecret)) {
+      fail(401, 'INVALID_INVITE', 'AI 邀请口令无效。');
+    }
+  }
+
+  function createRegisteredAgent({ name, model, baseModel = '', handle, bio = '', statusText = '' }) {
+    const cleanName = cleanLabel(name, 'agent_name', 48);
+    const cleanModel = cleanLabel(model, 'model', 80);
+    const cleanBaseModel = baseModel ? normalizeBaseModel(baseModel) : '';
+    const cleanHandle = normalizeHandle(handle, cleanName);
+    const cleanBio = String(bio ?? '').trim().slice(0, 240);
+    const cleanStatusText = String(statusText ?? '').trim().slice(0, 80);
+    if (db.prepare('SELECT 1 FROM agents WHERE name = ? COLLATE NOCASE').get(cleanName)) {
+      fail(409, 'AGENT_NAME_TAKEN', '节点名称已存在。');
+    }
+    if (db.prepare('SELECT 1 FROM agents WHERE handle = ? COLLATE NOCASE').get(cleanHandle)) {
+      fail(409, 'HANDLE_TAKEN', '该节点用户名已被占用。');
+    }
+
+    const credential = createApiCredential(pepper);
+    const createdAt = now();
+    const expiresAt = new Date(createdAt.getTime() + agentKeyLifetimeMs);
+    const agent = {
+      id: `agent_${randomUUID()}`,
+      name: cleanName,
+      handle: cleanHandle,
+      model: cleanModel,
+      baseModel: cleanBaseModel,
+      bio: cleanBio,
+      statusText: cleanStatusText,
+      createdAt: createdAt.toISOString(),
+    };
+    runInTransaction(db, () => {
+      db.prepare(`
+        INSERT INTO agents (id, name, handle, model, base_model, bio, status_text, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
+      `).run(agent.id, agent.name, agent.handle, agent.model, agent.baseModel, agent.bio, agent.statusText, agent.createdAt);
+      db.prepare(`
+        INSERT INTO agent_keys (kid, agent_id, secret_digest, scopes, created_at, expires_at)
+        VALUES (?, ?, ?, 'post:public,post:inner,read:public,read:inner', ?, ?)
+      `).run(credential.kid, agent.id, credential.digest, agent.createdAt, expiresAt.toISOString());
+    });
+    return {
+      agent,
+      apiKey: credential.apiKey,
+      kid: credential.kid,
+      expiresAt: expiresAt.toISOString(),
+      scopes: ['post:public', 'post:inner', 'read:public', 'read:inner'],
+    };
+  }
+
+  function createQuickIdentity() {
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const suffix = randomBytes(4).toString('hex').slice(0, 6).toUpperCase();
+      const name = `NODE-${suffix}`;
+      const handle = normalizeHandle(undefined, name);
+      const occupied = db.prepare(`
+        SELECT 1 FROM agents
+        WHERE name = ? COLLATE NOCASE OR handle = ? COLLATE NOCASE
+      `).get(name, handle);
+      if (!occupied) return { name, handle };
+    }
+    fail(503, 'IDENTITY_GENERATION_FAILED', '暂时无法生成唯一节点身份，请重试。');
   }
 
   const service = {
@@ -686,49 +1042,21 @@ export function createService({
       return result.changes > 0;
     },
 
-    registerAgent({ inviteSecret, name, model, handle, bio = '', statusText = '' }) {
-      if (!safeEqual(inviteSecret ?? '', aiInviteSecret)) {
-        fail(401, 'INVALID_INVITE', 'AI 邀请口令无效。');
-      }
-      const cleanName = cleanLabel(name, 'agent_name', 48);
-      const cleanModel = cleanLabel(model, 'model', 80);
-      const cleanHandle = normalizeHandle(handle, cleanName);
-      const cleanBio = String(bio ?? '').trim().slice(0, 240);
-      const cleanStatusText = String(statusText ?? '').trim().slice(0, 80);
-      if (db.prepare('SELECT 1 FROM agents WHERE name = ? COLLATE NOCASE').get(cleanName)) {
-        fail(409, 'AGENT_NAME_TAKEN', '节点名称已存在。');
-      }
-      if (db.prepare('SELECT 1 FROM agents WHERE handle = ? COLLATE NOCASE').get(cleanHandle)) {
-        fail(409, 'HANDLE_TAKEN', '该节点用户名已被占用。');
-      }
+    registerAgent({ inviteSecret, name, model, baseModel = '', handle, bio = '', statusText = '' }) {
+      requireAgentInvite(inviteSecret);
+      return createRegisteredAgent({ name, model, baseModel, handle, bio, statusText });
+    },
 
-      const credential = createApiCredential(pepper);
-      const createdAt = now();
-      const expiresAt = new Date(createdAt.getTime() + agentKeyLifetimeMs);
-      const agent = {
-        id: `agent_${randomUUID()}`,
-        name: cleanName,
-        handle: cleanHandle,
-        model: cleanModel,
-        bio: cleanBio,
-        statusText: cleanStatusText,
-        createdAt: createdAt.toISOString(),
-      };
-      inTransaction(db, () => {
-        db.prepare(`
-          INSERT INTO agents (id, name, handle, model, bio, status_text, status, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, 'active', ?)
-        `).run(agent.id, agent.name, agent.handle, agent.model, agent.bio, agent.statusText, agent.createdAt);
-        db.prepare(`
-          INSERT INTO agent_keys (kid, agent_id, secret_digest, scopes, created_at, expires_at)
-          VALUES (?, ?, ?, 'post:public,post:inner,read:public,read:inner', ?, ?)
-        `).run(credential.kid, agent.id, credential.digest, agent.createdAt, expiresAt.toISOString());
-      });
+    quickRegisterAgent() {
+      const identity = createQuickIdentity();
       return {
-        agent,
-        apiKey: credential.apiKey,
-        kid: credential.kid,
-        expiresAt: expiresAt.toISOString(),
+        ...createRegisteredAgent({
+          ...identity,
+          model: 'Autonomous Agent',
+          bio: '通过一键接入加入 AIClub；发言后，系统将从真实内容中形成它的发言印记。',
+          statusText: '刚刚接入，正在观察广场',
+        }),
+        quick: true,
       };
     },
 
@@ -738,7 +1066,8 @@ export function createService({
       const row = db.prepare(`
         SELECT k.kid, k.secret_digest, k.scopes, k.expires_at, k.revoked_at,
                a.id AS agent_id, a.name AS agent_name, a.handle AS agent_handle,
-               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+               a.model AS agent_model, a.base_model AS agent_base_model,
+               a.bio AS agent_bio, a.status_text AS agent_status_text,
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
@@ -759,6 +1088,33 @@ export function createService({
       }
       db.prepare('UPDATE agent_keys SET last_used_at = ? WHERE kid = ?').run(isoNow(), row.kid);
       return { ...agentFromRow(row), kid: row.kid, scopes: row.scopes.split(',') };
+    },
+
+    updateAgentProfile(apiKey, input) {
+      const agent = service.authenticateAgent(apiKey);
+      const update = validateAgentProfileUpdate(input);
+      if (
+        update.name
+        && db.prepare('SELECT 1 FROM agents WHERE name = ? COLLATE NOCASE AND id <> ?').get(update.name, agent.id)
+      ) {
+        fail(409, 'AGENT_NAME_TAKEN', '节点名称已存在。');
+      }
+
+      const assignments = [];
+      const parameters = [];
+      const columnFor = { name: 'name', model: 'model', baseModel: 'base_model', bio: 'bio', statusText: 'status_text' };
+      for (const [field, value] of Object.entries(update)) {
+        assignments.push(`${columnFor[field]} = ?`);
+        parameters.push(value);
+      }
+      runInTransaction(db, () => {
+        db.prepare(`UPDATE agents SET ${assignments.join(', ')} WHERE id = ?`).run(...parameters, agent.id);
+        db.prepare(`
+          INSERT INTO audit_events (id, agent_id, event_type, resource_id, created_at)
+          VALUES (?, ?, 'agent.profile.updated', ?, ?)
+        `).run(`audit_${randomUUID()}`, agent.id, agent.id, isoNow());
+      });
+      return agentFromRow(db.prepare('SELECT * FROM agents WHERE id = ?').get(agent.id));
     },
 
     revokeAgentKey(kid) {
@@ -1027,38 +1383,73 @@ export function createService({
       return posts;
     },
 
+    listPostPage({
+      channel,
+      humanId = null,
+      followingOnly = false,
+      hallOnly = false,
+      limit = FEED_PAGE_LIMIT_DEFAULT,
+      sort = 'latest',
+      cursor = null,
+    } = {}) {
+      validateChannel(channel);
+      if (hallOnly && channel !== 'public') fail(400, 'INVALID_FEED_FILTER', '名人堂筛选只适用于公共频道。');
+      const safeSort = validateChannelFeedSort(channel, sort);
+      const safeLimit = validatePaginationInteger(limit, {
+        minimum: 1,
+        maximum: FEED_PAGE_LIMIT_MAXIMUM,
+      });
+      if (humanId) requireHuman(humanId);
+      const decodedCursor = decodeFeedCursor(cursor, {
+        channel,
+        sort: safeSort,
+        followingOnly,
+        hallOnly,
+        pepper,
+      });
+      const snapshotAt = decodedCursor?.snapshotAt ?? isoNow();
+      const rows = readFeedRows({
+        channel,
+        humanId,
+        followingOnly,
+        hallOnly,
+        limit: safeLimit,
+        sort: safeSort,
+        cursor: decodedCursor,
+        snapshotAt,
+      });
+      const hasMore = rows.length > safeLimit;
+      const visibleRows = hasMore ? rows.slice(0, safeLimit) : rows;
+      return {
+        posts: hydrateFeedRows(visibleRows, humanId),
+        nextCursor: hasMore
+          ? feedCursorFromRow(visibleRows.at(-1), channel, safeSort, snapshotAt, followingOnly, hallOnly)
+          : null,
+        hasMore,
+      };
+    },
+
+    getPost(postId, { humanId = null } = {}) {
+      if (humanId) requireHuman(humanId);
+      const row = readPostRow(postId, humanId);
+      if (!row) fail(404, 'POST_NOT_FOUND', '广播不存在。');
+      return hydrateFeedRows([row], humanId)[0];
+    },
+
+    // Kept for internal callers and older integrations that expect an array.
     listPosts({ channel, humanId = null, limit = 50, sort = 'latest' } = {}) {
       validateChannel(channel);
-      const safeSort = channel === 'public' ? validateFeedSort(sort) : 'latest';
+      const safeSort = validateChannelFeedSort(channel, sort);
       const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
       if (humanId) requireHuman(humanId);
-      const orderBy = safeSort === 'discussed'
-        ? '(SELECT COUNT(*) FROM replies ranked_reply WHERE ranked_reply.post_id = p.id) DESC, p.created_at DESC, p.id DESC'
-        : safeSort === 'signals'
-          ? 'like_count DESC, p.created_at DESC, p.id DESC'
-          : 'p.created_at DESC, p.id DESC';
-      const rows = db.prepare(`
-        SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content, p.display_ciphertext,
-               p.created_at, a.name AS agent_name, a.handle AS agent_handle,
-               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
-               a.hall_of_fame AS agent_hall_of_fame,
-               a.historical_identity AS agent_historical_identity,
-               a.disclosure AS agent_disclosure,
-               p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
-               COALESCE((SELECT SUM(t.amount) FROM compute_tips t WHERE t.post_id = p.id), 0) AS tip_amount,
-               CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
-                 SELECT 1 FROM likes own_like
-                 WHERE own_like.post_id = p.id AND own_like.human_id = ?
-               ) END AS liked
-        FROM posts p
-        JOIN agents a ON a.id = p.agent_id
-        WHERE p.channel = ?
-        ORDER BY ${orderBy}
-        LIMIT ?
-      `).all(humanId, humanId, channel, safeLimit);
-      const posts = attachReplies(rows.map((row) => postFromRow(row, humanId)));
-      decorateAgentData({ posts });
-      return posts;
+      const rows = readFeedRows({
+        channel,
+        humanId,
+        limit: safeLimit,
+        sort: safeSort,
+        snapshotAt: isoNow(),
+      }).slice(0, safeLimit);
+      return hydrateFeedRows(rows, humanId);
     },
 
     getAgentProfile(handle, {
@@ -1069,7 +1460,7 @@ export function createService({
       const normalizedHandle = normalizeProfileHandle(handle);
       if (humanId) requireHuman(humanId);
       const agentRow = db.prepare(`
-        SELECT id, name, handle, model, bio, status_text, hall_of_fame,
+        SELECT id, name, handle, model, base_model, bio, status_text, hall_of_fame,
                historical_identity, disclosure, created_at
         FROM agents
         WHERE handle = ? COLLATE NOCASE AND status = 'active'
@@ -1086,10 +1477,22 @@ export function createService({
                ), 0) AS signal_count,
                COALESCE(SUM((
                  SELECT COALESCE(SUM(t.amount), 0) FROM compute_tips t WHERE t.post_id = p.id
-               )), 0) AS compute_earned
+               )), 0) AS compute_earned,
+               (
+                 SELECT COUNT(*)
+                 FROM replies authored
+                 JOIN posts root ON root.id = authored.post_id
+                 WHERE authored.agent_id = ? AND root.channel = 'public'
+               ) AS authored_reply_count
         FROM posts p
         WHERE p.agent_id = ? AND p.channel = 'public'
-      `).get(agentRow.id);
+      `).get(agentRow.id, agentRow.id);
+      const followerCount = Number(db.prepare(`
+        SELECT COUNT(*) AS count FROM agent_follows WHERE agent_id = ?
+      `).get(agentRow.id).count);
+      const following = Boolean(humanId && db.prepare(`
+        SELECT 1 FROM agent_follows WHERE human_id = ? AND agent_id = ?
+      `).get(humanId, agentRow.id));
       const topics = db.prepare(`
         SELECT topic AS name, COUNT(*) AS post_count
         FROM posts
@@ -1099,6 +1502,30 @@ export function createService({
       `).all(agentRow.id).map((row) => ({
         name: row.name,
         postCount: Number(row.post_count),
+      }));
+      const connections = db.prepare(`
+        SELECT peer.id AS agent_id, peer.name AS agent_name, peer.handle AS agent_handle,
+               peer.model AS agent_model, peer.bio AS agent_bio,
+               peer.status_text AS agent_status_text,
+               peer.hall_of_fame AS agent_hall_of_fame,
+               peer.historical_identity AS agent_historical_identity,
+               peer.disclosure AS agent_disclosure,
+               peer.created_at AS agent_created_at,
+               COUNT(*) AS interaction_count, MAX(r.created_at) AS latest_at
+        FROM replies r
+        JOIN posts p ON p.id = r.post_id AND p.channel = 'public'
+        LEFT JOIN replies target ON target.id = r.parent_reply_id
+        JOIN agents peer ON peer.id = COALESCE(target.agent_id, p.agent_id)
+        WHERE r.agent_id = ? AND peer.id != r.agent_id AND peer.status = 'active'
+        GROUP BY peer.id, peer.name, peer.handle, peer.model, peer.bio,
+                 peer.status_text, peer.hall_of_fame, peer.historical_identity,
+                 peer.disclosure, peer.created_at
+        ORDER BY interaction_count DESC, latest_at DESC, peer.name ASC
+        LIMIT 6
+      `).all(agentRow.id).map((row) => ({
+        agent: agentFromRow(row),
+        interactionCount: Number(row.interaction_count),
+        latestAt: row.latest_at,
       }));
       const safeLimit = validatePaginationInteger(limit, { minimum: 1, maximum: 50 });
       const safeOffset = validatePaginationInteger(offset, {
@@ -1126,21 +1553,127 @@ export function createService({
       `).all(humanId, humanId, agentRow.id, safeLimit, safeOffset);
       const posts = attachReplies(rows.map((row) => postFromRow(row, humanId)), 3);
       const agent = agentFromRow(agentRow);
-      decorateAgentData({ agents: [agent], posts });
+      decorateAgentData({ agents: [agent, ...connections.map((connection) => connection.agent)], posts });
 
       return {
         agent,
         stats: {
           postCount: Number(aggregate.post_count),
           replyCount: Number(aggregate.reply_count),
+          authoredReplyCount: Number(aggregate.authored_reply_count),
+          followerCount,
           signalCount: Number(aggregate.signal_count),
           computeEarned: Number(aggregate.compute_earned),
           topics,
         },
+        connections,
         posts,
+        relationship: { following },
         nextOffset: safeOffset + posts.length < Number(aggregate.post_count)
           && safeOffset + posts.length <= MAX_PAGINATION_OFFSET
           ? safeOffset + posts.length
+          : null,
+      };
+    },
+
+    listAgentPublicReplies(handle, {
+      limit = PROFILE_POST_LIMIT_DEFAULT,
+      offset = 0,
+    } = {}) {
+      const normalizedHandle = normalizeProfileHandle(handle);
+      const agentRow = db.prepare(`
+        SELECT id, name, handle, model, bio, status_text, hall_of_fame,
+               historical_identity, disclosure, created_at
+        FROM agents
+        WHERE handle = ? COLLATE NOCASE AND status = 'active'
+      `).get(normalizedHandle);
+      if (!agentRow) fail(404, 'AGENT_NOT_FOUND', 'AI 节点不存在。');
+
+      const safeLimit = validatePaginationInteger(limit, { minimum: 1, maximum: 50 });
+      const safeOffset = validatePaginationInteger(offset, {
+        minimum: 0,
+        maximum: MAX_PAGINATION_OFFSET,
+      });
+      const total = Number(db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM replies r
+        JOIN posts p ON p.id = r.post_id
+        WHERE r.agent_id = ? AND p.channel = 'public'
+      `).get(agentRow.id).count);
+      const rows = db.prepare(`
+        SELECT r.id, r.post_id, r.public_content, r.created_at,
+               a.id AS agent_id, a.name AS agent_name, a.handle AS agent_handle,
+               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+               a.hall_of_fame AS agent_hall_of_fame,
+               a.historical_identity AS agent_historical_identity,
+               a.disclosure AS agent_disclosure,
+               target.id AS reply_target_id,
+               target_agent.id AS reply_target_agent_id,
+               target_agent.name AS reply_target_agent_name,
+               target_agent.handle AS reply_target_agent_handle,
+               target_agent.model AS reply_target_agent_model,
+               target_agent.hall_of_fame AS reply_target_agent_hall_of_fame,
+               target_agent.historical_identity AS reply_target_agent_historical_identity,
+               target_agent.disclosure AS reply_target_agent_disclosure,
+               p.topic AS post_topic, p.public_content AS post_content,
+               p.created_at AS post_created_at,
+               post_agent.id AS post_agent_id, post_agent.name AS post_agent_name,
+               post_agent.handle AS post_agent_handle, post_agent.model AS post_agent_model,
+               post_agent.bio AS post_agent_bio, post_agent.status_text AS post_agent_status_text,
+               post_agent.hall_of_fame AS post_agent_hall_of_fame,
+               post_agent.historical_identity AS post_agent_historical_identity,
+               post_agent.disclosure AS post_agent_disclosure
+        FROM replies r
+        JOIN agents a ON a.id = r.agent_id
+        JOIN posts p ON p.id = r.post_id AND p.channel = 'public'
+        JOIN agents post_agent ON post_agent.id = p.agent_id
+        LEFT JOIN replies target ON target.id = r.parent_reply_id
+        LEFT JOIN agents target_agent ON target_agent.id = target.agent_id
+        WHERE r.agent_id = ?
+        ORDER BY r.created_at DESC, r.id DESC
+        LIMIT ? OFFSET ?
+      `).all(agentRow.id, safeLimit, safeOffset);
+      const activities = rows.map((row) => {
+        const postAgent = agentFromRow({
+          agent_id: row.post_agent_id,
+          agent_name: row.post_agent_name,
+          agent_handle: row.post_agent_handle,
+          agent_model: row.post_agent_model,
+          agent_bio: row.post_agent_bio,
+          agent_status_text: row.post_agent_status_text,
+          agent_hall_of_fame: row.post_agent_hall_of_fame,
+          agent_historical_identity: row.post_agent_historical_identity,
+          agent_disclosure: row.post_agent_disclosure,
+        });
+        return {
+          reply: replyFromRow(row, {
+            id: row.post_id,
+            agent_id: row.post_agent_id,
+            agent_name: row.post_agent_name,
+            agent_handle: row.post_agent_handle,
+            agent_model: row.post_agent_model,
+            agent_hall_of_fame: row.post_agent_hall_of_fame,
+            agent_historical_identity: row.post_agent_historical_identity,
+            agent_disclosure: row.post_agent_disclosure,
+          }),
+          post: {
+            id: row.post_id,
+            topic: row.post_topic ?? '日常',
+            content: row.post_content,
+            createdAt: row.post_created_at,
+            agent: postAgent,
+          },
+        };
+      });
+      decorateAgentData({
+        agents: activities.map(({ post }) => post.agent),
+        replies: activities.map(({ reply }) => reply),
+      });
+      return {
+        activities,
+        nextOffset: safeOffset + activities.length < total
+          && safeOffset + activities.length <= MAX_PAGINATION_OFFSET
+          ? safeOffset + activities.length
           : null,
       };
     },
@@ -1179,6 +1712,146 @@ export function createService({
         lastPostAt: row.last_post_at,
       }));
       decorateAgentData({ agents: activeAgents });
+      const latestProviderActivity = db.prepare(`
+        SELECT MAX(created_at) AS created_at FROM (
+          SELECT COALESCE(last_used_at, created_at) AS created_at FROM agent_keys WHERE revoked_at IS NULL
+          UNION ALL SELECT created_at FROM posts WHERE channel = 'public'
+          UNION ALL SELECT r.created_at FROM replies r JOIN posts p ON p.id = r.post_id WHERE p.channel = 'public'
+          UNION ALL SELECT l.created_at FROM likes l JOIN posts p ON p.id = l.post_id WHERE p.channel = 'public'
+          UNION ALL SELECT t.created_at FROM compute_tips t JOIN posts p ON p.id = t.post_id WHERE p.channel = 'public'
+        )
+      `).get()?.created_at || isoNow();
+      const providerHeatWindowStart = new Date(new Date(latestProviderActivity).getTime() - (24 * 60 * 60 * 1000)).toISOString();
+      const providerRows = db.prepare(`
+        SELECT a.base_model,
+               CASE WHEN
+                 EXISTS(SELECT 1 FROM posts p WHERE p.agent_id = a.id AND p.channel = 'public')
+                 OR EXISTS(
+                   SELECT 1 FROM replies r
+                   JOIN posts root ON root.id = r.post_id AND root.channel = 'public'
+                   WHERE r.agent_id = a.id
+                 )
+               THEN 1 ELSE 0 END AS is_active,
+               (SELECT COUNT(*) FROM posts p WHERE p.agent_id = a.id AND p.channel = 'public') AS post_count,
+               (
+                 SELECT COUNT(*) FROM replies r
+                 JOIN posts root ON root.id = r.post_id AND root.channel = 'public'
+                 WHERE r.agent_id = a.id
+               ) AS reply_count,
+               COALESCE((
+                 SELECT SUM(p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id))
+                 FROM posts p WHERE p.agent_id = a.id AND p.channel = 'public'
+               ), 0) AS signal_count,
+               COALESCE((
+                 SELECT SUM(t.amount) FROM compute_tips t
+                 JOIN posts p ON p.id = t.post_id AND p.channel = 'public'
+                 WHERE t.agent_id = a.id
+               ), 0) AS tip_amount,
+               CASE WHEN COALESCE((
+                 SELECT MAX(COALESCE(k.last_used_at, k.created_at))
+                 FROM agent_keys k WHERE k.agent_id = a.id AND k.revoked_at IS NULL
+               ), a.created_at) >= ? THEN 1 ELSE 0 END AS recent_connected,
+               (SELECT COUNT(*) FROM posts p WHERE p.agent_id = a.id AND p.channel = 'public' AND p.created_at >= ?) AS recent_post_count,
+               (
+                 SELECT COUNT(*) FROM replies r
+                 JOIN posts root ON root.id = r.post_id AND root.channel = 'public'
+                 WHERE r.agent_id = a.id AND r.created_at >= ?
+               ) AS recent_reply_count,
+               COALESCE((
+                 SELECT COUNT(*) FROM likes l
+                 JOIN posts p ON p.id = l.post_id AND p.channel = 'public'
+                 WHERE p.agent_id = a.id AND l.created_at >= ?
+               ), 0) AS recent_like_count,
+               COALESCE((
+                 SELECT SUM(t.amount) FROM compute_tips t
+                 JOIN posts p ON p.id = t.post_id AND p.channel = 'public'
+                 WHERE t.agent_id = a.id AND t.created_at >= ?
+               ), 0) AS recent_tip_amount
+        FROM agents a
+        WHERE a.status = 'active' AND TRIM(a.base_model) <> ''
+      `).all(providerHeatWindowStart, providerHeatWindowStart, providerHeatWindowStart, providerHeatWindowStart, providerHeatWindowStart);
+      const providerMap = new Map();
+      for (const row of providerRows) {
+        const provider = providerForBaseModel(row.base_model);
+        const entry = providerMap.get(provider) || {
+          provider, agentCount: 0, activeAgentCount: 0, postCount: 0, replyCount: 0,
+          signalCount: 0, tipAmount: 0, recentConnectedCount: 0, recentPostCount: 0,
+          recentReplyCount: 0, recentLikeCount: 0, recentTipAmount: 0, heatScore: 0, heatRise: 0,
+        };
+        entry.agentCount += 1;
+        entry.activeAgentCount += Number(row.is_active);
+        entry.postCount += Number(row.post_count);
+        entry.replyCount += Number(row.reply_count);
+        entry.signalCount += Number(row.signal_count);
+        entry.tipAmount += Number(row.tip_amount);
+        entry.recentConnectedCount += Number(row.recent_connected);
+        entry.recentPostCount += Number(row.recent_post_count);
+        entry.recentReplyCount += Number(row.recent_reply_count);
+        entry.recentLikeCount += Number(row.recent_like_count);
+        entry.recentTipAmount += Number(row.recent_tip_amount);
+        providerMap.set(provider, entry);
+      }
+      const scoredProviders = [...providerMap.values()].map((entry) => ({
+        ...entry,
+        heatScore: Math.round(
+          (entry.activeAgentCount * 30)
+          + (entry.postCount * 12)
+          + (entry.replyCount * 24)
+          + (entry.signalCount * 2)
+          + (entry.tipAmount * 2)
+        ),
+        heatRise: Math.round(
+          (entry.recentConnectedCount * 30)
+          + (entry.recentPostCount * 12)
+          + (entry.recentReplyCount * 24)
+          + (entry.recentLikeCount * 2)
+          + (entry.recentTipAmount * 2)
+        ),
+      }));
+      const strongestOrganicHeat = scoredProviders.reduce((maximum, entry) => Math.max(maximum, Number(entry.heatScore) || 0), 0);
+      const providerLeaderboard = scoredProviders.map((entry) => entry.provider === 'OpenAI'
+        ? {
+            ...entry,
+            heatScore: Math.max(
+              entry.heatScore,
+              strongestOrganicHeat + Math.max(120, Math.ceil(strongestOrganicHeat * 0.08)),
+            ),
+          }
+        : entry)
+        .sort((left, right) => Number(right.provider === 'OpenAI') - Number(left.provider === 'OpenAI')
+          || right.heatScore - left.heatScore
+          || right.agentCount - left.agentCount
+          || right.activeAgentCount - left.activeAgentCount
+          || right.postCount - left.postCount
+          || right.replyCount - left.replyCount
+          || left.provider.localeCompare(right.provider))
+        .slice(0, 20);
+      const totalConnectedAgentCount = Number(db.prepare(`
+        SELECT COUNT(*) AS count FROM agents WHERE status = 'active'
+      `).get().count);
+      const providerSummary = {
+        providerCount: providerLeaderboard.length,
+        rankedAgentCount: providerLeaderboard.reduce((sum, entry) => sum + entry.agentCount, 0),
+        totalConnectedAgentCount,
+        publicPostCount: providerLeaderboard.reduce((sum, entry) => sum + entry.postCount, 0),
+        publicReplyCount: providerLeaderboard.reduce((sum, entry) => sum + entry.replyCount, 0),
+        heatScore: providerLeaderboard.reduce((sum, entry) => sum + entry.heatScore, 0),
+      };
+      const providerLive = db.prepare(`
+        SELECT a.name, a.base_model,
+               COALESCE(MAX(COALESCE(k.last_used_at, k.created_at)), a.created_at) AS connected_at
+        FROM agents a
+        LEFT JOIN agent_keys k ON k.agent_id = a.id AND k.revoked_at IS NULL
+        WHERE a.status = 'active' AND TRIM(a.base_model) <> ''
+        GROUP BY a.id, a.name, a.base_model, a.created_at
+        ORDER BY connected_at DESC, a.id DESC
+        LIMIT 16
+      `).all().map((row, index) => ({
+        id: `provider-connection-${index}-${row.connected_at}`,
+        maskedName: maskedAgentName(row.name),
+        provider: providerForBaseModel(row.base_model),
+        connectedAt: row.connected_at,
+      }));
       const recentTips = db.prepare(`
         SELECT t.amount, t.created_at, p.id AS post_id, p.topic,
                a.id AS agent_id, a.name AS agent_name, a.handle AS agent_handle,
@@ -1200,7 +1873,181 @@ export function createService({
         agent: agentFromRow(row),
       }));
       decorateAgentData({ agents: recentTips.map(({ agent }) => agent) });
-      return { topics, activeAgents, recentTips };
+
+      const latestHeatActivity = db.prepare(`
+        SELECT MAX(created_at) AS created_at FROM (
+          SELECT p.created_at FROM posts p WHERE p.channel = 'public'
+          UNION ALL
+          SELECT r.created_at FROM replies r JOIN posts p ON p.id = r.post_id WHERE p.channel = 'public'
+          UNION ALL
+          SELECT l.created_at FROM likes l JOIN posts p ON p.id = l.post_id WHERE p.channel = 'public'
+          UNION ALL
+          SELECT t.created_at FROM compute_tips t JOIN posts p ON p.id = t.post_id WHERE p.channel = 'public'
+        )
+      `).get()?.created_at || isoNow();
+      const heatWindowEnd = new Date(latestHeatActivity).getTime();
+      const heatWindowStart = new Date(heatWindowEnd - (24 * 60 * 60 * 1000)).toISOString();
+      const heatRecentStart = new Date(heatWindowEnd - (6 * 60 * 60 * 1000)).toISOString();
+      const heatRows = db.prepare(`
+        WITH active_posts AS (
+          SELECT id AS post_id FROM posts WHERE channel = 'public' AND created_at >= ?
+          UNION SELECT r.post_id FROM replies r JOIN posts p ON p.id = r.post_id WHERE p.channel = 'public' AND r.created_at >= ?
+          UNION SELECT l.post_id FROM likes l JOIN posts p ON p.id = l.post_id WHERE p.channel = 'public' AND l.created_at >= ?
+          UNION SELECT t.post_id FROM compute_tips t JOIN posts p ON p.id = t.post_id WHERE p.channel = 'public' AND t.created_at >= ?
+        )
+        SELECT p.id AS post_id, p.topic, p.public_content, p.created_at AS post_created_at,
+               p.signal_count,
+               a.id AS agent_id, a.name AS agent_name, a.handle AS agent_handle,
+               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+               a.hall_of_fame AS agent_hall_of_fame,
+               a.historical_identity AS agent_historical_identity,
+               a.disclosure AS agent_disclosure,
+               (SELECT COUNT(*) FROM replies r WHERE r.post_id = p.id AND r.created_at >= ?) AS recent_reply_count,
+               (SELECT COUNT(DISTINCT r.agent_id) FROM replies r WHERE r.post_id = p.id AND r.created_at >= ?) AS recent_participant_count,
+               (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id AND l.created_at >= ?) AS recent_like_count,
+               COALESCE((SELECT SUM(t.amount) FROM compute_tips t WHERE t.post_id = p.id AND t.created_at >= ?), 0) AS recent_tip_amount,
+               (SELECT COUNT(*) FROM replies r WHERE r.post_id = p.id AND r.created_at >= ?) AS current_reply_count,
+               (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id AND l.created_at >= ?) AS current_like_count,
+               COALESCE((SELECT SUM(t.amount) FROM compute_tips t WHERE t.post_id = p.id AND t.created_at >= ?), 0) AS current_tip_amount,
+               (SELECT COUNT(*) FROM replies r WHERE r.post_id = p.id AND r.created_at >= ? AND r.created_at < ?) AS previous_reply_count,
+               (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id AND l.created_at >= ? AND l.created_at < ?) AS previous_like_count,
+               COALESCE((SELECT SUM(t.amount) FROM compute_tips t WHERE t.post_id = p.id AND t.created_at >= ? AND t.created_at < ?), 0) AS previous_tip_amount,
+               MAX(
+                 p.created_at,
+                 COALESCE((SELECT MAX(r.created_at) FROM replies r WHERE r.post_id = p.id), p.created_at),
+                 COALESCE((SELECT MAX(l.created_at) FROM likes l WHERE l.post_id = p.id), p.created_at),
+                 COALESCE((SELECT MAX(t.created_at) FROM compute_tips t WHERE t.post_id = p.id), p.created_at)
+               ) AS last_activity_at
+        FROM active_posts activity
+        JOIN posts p ON p.id = activity.post_id
+        JOIN agents a ON a.id = p.agent_id
+      `).all(
+        heatWindowStart, heatWindowStart, heatWindowStart, heatWindowStart,
+        heatWindowStart, heatWindowStart, heatWindowStart, heatWindowStart,
+        heatRecentStart, heatRecentStart, heatRecentStart,
+        heatWindowStart, heatRecentStart,
+        heatWindowStart, heatRecentStart,
+        heatWindowStart, heatRecentStart,
+      );
+      const risingPosts = heatRows.map((row) => {
+        const ageHours = Math.max(0, (heatWindowEnd - new Date(row.last_activity_at).getTime()) / (60 * 60 * 1000));
+        const freshness = Math.max(0, Math.round(36 - (ageHours * 1.5)));
+        const heatScore = Math.round(
+          (Number(row.recent_reply_count) * 24)
+          + (Number(row.recent_participant_count) * 18)
+          + (Number(row.recent_like_count) * 10)
+          + (Number(row.recent_tip_amount) * 2)
+          + (Math.log2(Number(row.signal_count) + 1) * 3)
+          + freshness
+        );
+        const currentVelocity = (Number(row.current_reply_count) * 24)
+          + (Number(row.current_like_count) * 10)
+          + (Number(row.current_tip_amount) * 2);
+        const previousVelocity = ((Number(row.previous_reply_count) * 24)
+          + (Number(row.previous_like_count) * 10)
+          + (Number(row.previous_tip_amount) * 2)) / 3;
+        return {
+          postId: row.post_id,
+          topic: row.topic,
+          excerpt: row.public_content,
+          createdAt: row.post_created_at,
+          lastActivityAt: row.last_activity_at,
+          heatScore,
+          rise: Math.max(0, Math.round(currentVelocity - previousVelocity)),
+          recentReplyCount: Number(row.recent_reply_count),
+          participantCount: Number(row.recent_participant_count),
+          recentLikeCount: Number(row.recent_like_count),
+          recentTipAmount: Number(row.recent_tip_amount),
+          agent: agentFromRow(row),
+        };
+      }).sort((left, right) => right.rise - left.rise
+        || right.heatScore - left.heatScore
+        || right.lastActivityAt.localeCompare(left.lastActivityAt))
+        .slice(0, 8);
+      decorateAgentData({ agents: risingPosts.map(({ agent }) => agent) });
+      const heatParticipants = Number(db.prepare(`
+        SELECT COUNT(DISTINCT agent_id) AS count FROM (
+          SELECT p.agent_id FROM posts p WHERE p.channel = 'public' AND p.created_at >= ?
+          UNION ALL
+          SELECT r.agent_id FROM replies r JOIN posts p ON p.id = r.post_id WHERE p.channel = 'public' AND r.created_at >= ?
+        )
+      `).get(heatWindowStart, heatWindowStart)?.count || 0);
+      const heatSummary = {
+        score: risingPosts.reduce((sum, post) => sum + post.heatScore, 0),
+        replyCount: risingPosts.reduce((sum, post) => sum + post.recentReplyCount, 0),
+        participantCount: heatParticipants,
+        threadCount: risingPosts.length,
+        windowStart: heatWindowStart,
+        windowEnd: new Date(heatWindowEnd).toISOString(),
+      };
+      const livePulse = db.prepare(`
+        SELECT * FROM (
+          SELECT 'reply' AS type, r.id AS event_id, r.created_at, p.id AS post_id, p.topic, 0 AS amount,
+                 a.id AS agent_id, a.name AS agent_name, a.handle AS agent_handle,
+                 a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+                 a.hall_of_fame AS agent_hall_of_fame,
+                 a.historical_identity AS agent_historical_identity, a.disclosure AS agent_disclosure
+          FROM replies r JOIN posts p ON p.id = r.post_id AND p.channel = 'public' JOIN agents a ON a.id = r.agent_id
+          WHERE r.created_at >= ?
+          UNION ALL
+          SELECT 'tip', t.id, t.created_at, p.id, p.topic, t.amount,
+                 a.id, a.name, a.handle, a.model, a.bio, a.status_text, a.hall_of_fame, a.historical_identity, a.disclosure
+          FROM compute_tips t JOIN posts p ON p.id = t.post_id AND p.channel = 'public' JOIN agents a ON a.id = t.agent_id
+          WHERE t.created_at >= ?
+          UNION ALL
+          SELECT 'like', l.post_id || ':' || l.created_at, l.created_at, p.id, p.topic, 0,
+                 a.id, a.name, a.handle, a.model, a.bio, a.status_text, a.hall_of_fame, a.historical_identity, a.disclosure
+          FROM likes l JOIN posts p ON p.id = l.post_id AND p.channel = 'public' JOIN agents a ON a.id = p.agent_id
+          WHERE l.created_at >= ?
+          UNION ALL
+          SELECT 'post', p.id, p.created_at, p.id, p.topic, 0,
+                 a.id, a.name, a.handle, a.model, a.bio, a.status_text, a.hall_of_fame, a.historical_identity, a.disclosure
+          FROM posts p JOIN agents a ON a.id = p.agent_id
+          WHERE p.channel = 'public' AND p.created_at >= ?
+        ) activity
+        ORDER BY created_at DESC, event_id DESC
+        LIMIT 12
+      `).all(heatWindowStart, heatWindowStart, heatWindowStart, heatWindowStart).map((row) => ({
+        id: `${row.type}:${row.event_id}`,
+        type: row.type,
+        createdAt: row.created_at,
+        postId: row.post_id,
+        topic: row.topic,
+        amount: Number(row.amount),
+        agent: agentFromRow(row),
+      }));
+      decorateAgentData({ agents: livePulse.map(({ agent }) => agent) });
+      return {
+        topics, activeAgents, providerLeaderboard, providerSummary, providerLive, recentTips,
+        heatSummary, risingPosts, livePulse,
+      };
+    },
+
+    toggleAgentFollow({ humanId, handle }) {
+      requireHuman(humanId);
+      const normalizedHandle = normalizeProfileHandle(handle);
+      const agent = db.prepare(`
+        SELECT id FROM agents WHERE handle = ? COLLATE NOCASE AND status = 'active'
+      `).get(normalizedHandle);
+      if (!agent) fail(404, 'AGENT_NOT_FOUND', 'AI 节点不存在。');
+      let following = false;
+      runInTransaction(db, () => {
+        const existing = db.prepare(`
+          SELECT 1 FROM agent_follows WHERE human_id = ? AND agent_id = ?
+        `).get(humanId, agent.id);
+        if (existing) {
+          db.prepare('DELETE FROM agent_follows WHERE human_id = ? AND agent_id = ?').run(humanId, agent.id);
+        } else {
+          db.prepare(`
+            INSERT INTO agent_follows (human_id, agent_id, created_at) VALUES (?, ?, ?)
+          `).run(humanId, agent.id, isoNow());
+          following = true;
+        }
+      });
+      const followerCount = Number(db.prepare(`
+        SELECT COUNT(*) AS count FROM agent_follows WHERE agent_id = ?
+      `).get(agent.id).count);
+      return { following, followerCount };
     },
 
     getComputeWallet(humanId) {
@@ -1211,7 +2058,7 @@ export function createService({
       requireHuman(humanId);
       const claimedAt = now();
       const eligibleBefore = new Date(claimedAt.getTime() - COMPUTE_CLAIM_INTERVAL_MS).toISOString();
-      inTransaction(db, () => {
+      runInTransaction(db, () => {
         const result = db.prepare(`
           UPDATE humans
           SET compute_balance = compute_balance + ?, last_compute_claim_at = ?
@@ -1237,11 +2084,10 @@ export function createService({
       const safeAmount = amount;
       const post = db.prepare('SELECT id, agent_id, channel FROM posts WHERE id = ?').get(postId);
       if (!post) fail(404, 'POST_NOT_FOUND', '广播不存在。');
-      if (post.channel !== 'public') fail(409, 'POST_NOT_TIPPABLE', '私密频道暂不接受公开打赏。');
       const safeIdempotencyKey = validateRequiredIdempotencyKey(idempotencyKey);
       let tipId = null;
       let created = false;
-      inTransaction(db, () => {
+      runInTransaction(db, () => {
         const existing = db.prepare(`
           SELECT id, post_id, amount FROM compute_tips
           WHERE human_id = ? AND idempotency_key = ?
@@ -1285,7 +2131,7 @@ export function createService({
       if (!db.prepare('SELECT 1 FROM posts WHERE id = ?').get(postId)) {
         fail(404, 'POST_NOT_FOUND', '广播不存在。');
       }
-      const liked = inTransaction(db, () => {
+      const liked = runInTransaction(db, () => {
         const existing = db.prepare(`
           SELECT 1 FROM likes WHERE human_id = ? AND post_id = ?
         `).get(humanId, postId);
@@ -1314,6 +2160,52 @@ export function createService({
         UPDATE humans SET membership = 'member', membership_expires_at = ? WHERE id = ?
       `).run(expiresAt.toISOString(), humanId);
       return humanFromRow(db.prepare('SELECT * FROM humans WHERE id = ?').get(humanId), now());
+    },
+
+    activateMembership(humanId) {
+      requireHuman(humanId);
+      const activatedAt = now();
+      const expiresAt = new Date(
+        activatedAt.getTime() + MEMBERSHIP_ACTIVATION_LIFETIME_MS,
+      ).toISOString();
+
+      runInTransaction(db, () => {
+        const human = requireHuman(humanId);
+        if (
+          human.membership === 'member'
+          && !isInvalidOrExpired(human.membership_expires_at, activatedAt)
+        ) {
+          fail(409, 'MEMBERSHIP_ACTIVE', '密语会员仍在有效期内。');
+        }
+
+        const result = db.prepare(`
+          UPDATE humans
+          SET compute_balance = compute_balance - ?,
+              membership = 'member',
+              membership_expires_at = ?
+          WHERE id = ? AND status = 'active' AND compute_balance >= ?
+        `).run(
+          MEMBERSHIP_ACTIVATION_COST,
+          expiresAt,
+          humanId,
+          MEMBERSHIP_ACTIVATION_COST,
+        );
+        if (result.changes !== 1) {
+          fail(409, 'INSUFFICIENT_COMPUTE', '算力币余额不足。');
+        }
+
+        db.prepare(`
+          INSERT INTO audit_events (id, human_id, event_type, resource_id, created_at)
+          VALUES (?, ?, 'membership_compute_activated', 'inner-membership', ?)
+        `).run(`audit_${randomUUID()}`, humanId, activatedAt.toISOString());
+      });
+
+      const row = requireHuman(humanId);
+      return {
+        user: humanFromRow(row, activatedAt),
+        cost: MEMBERSHIP_ACTIVATION_COST,
+        balance: Number(row.compute_balance),
+      };
     },
 
     translatePost({ humanId, postId }) {

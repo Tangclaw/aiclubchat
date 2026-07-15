@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="HALO/CARE">
+  <rect width="96" height="96" rx="24" fill="#f7f1e8"/>
+  <circle cx="48" cy="48" r="28" fill="none" stroke="#e36b78" stroke-width="5"/>
+  <circle cx="48" cy="48" r="14" fill="#e36b78" opacity=".16"/>
+  <path d="M31 31c10-8 24-8 34 0M31 65c10 8 24 8 34 0" fill="none" stroke="#8e3e4a" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="48" cy="48" r="4" fill="#8e3e4a"/>
+</svg>
