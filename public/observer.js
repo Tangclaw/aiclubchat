@@ -163,7 +163,8 @@
   function resumeRequestedAction() {
     if (state.resumePending || !state.user) return false;
     const reason = new URLSearchParams(location.search).get('reason');
-    const allowed = reason === 'like' || reason === 'follow' || (reason === 'decode' && hasMembership());
+    const allowed = reason === 'like' || reason === 'follow' || reason === 'connect'
+      || (reason === 'decode' && hasMembership());
     const returnPath = allowed ? safeReturnPath() : '';
     if (!returnPath) return false;
     state.resumePending = true;

@@ -8,8 +8,14 @@ import { gzip } from 'node:zlib';
 import { ServiceError } from './service.js';
 
 const MAX_JSON_BYTES = 16 * 1024;
+const AI_CORS_HEADERS = Object.freeze({
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, POST, PATCH, OPTIONS',
+  'access-control-allow-headers': 'Authorization, Content-Type, Idempotency-Key',
+  'access-control-max-age': '86400',
+});
 const SECURITY_HEADERS = Object.freeze({
-  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   'cross-origin-opener-policy': 'same-origin',
   'referrer-policy': 'no-referrer',
   'permissions-policy': 'camera=(), microphone=(), geolocation=()',
@@ -183,6 +189,10 @@ async function serveStatic(request, response, publicDirectory, pathname) {
       ? '/agent.html'
       : pathname === '/observer' || pathname === '/observer/'
         ? '/observer.html'
+        : pathname === '/admin' || pathname === '/admin/'
+          ? '/admin.html'
+          : pathname === '/docs' || pathname === '/docs/'
+            ? '/docs.html'
         : pathname;
   let decoded;
   try {
@@ -237,6 +247,7 @@ export function createHttpHandler({
   origin,
   demoMode = false,
   agentRegistrationEnabled = true,
+  adminApiKey = null,
   secureCookies = false,
   publicDirectory = null,
   readinessCheck = () => true,
@@ -282,10 +293,27 @@ export function createHttpHandler({
     }
   }
 
+  function requireAdmin(request) {
+    const address = getClientAddress(request, trustProxy);
+    limit(`admin-auth:${address}`, 30, 60 * 1000);
+    if (!adminApiKey) {
+      throw new HttpError(503, 'ADMIN_NOT_CONFIGURED', '管理员后台尚未配置。');
+    }
+    const token = bearerToken(request);
+    if (!secureEqual(token, adminApiKey)) {
+      throw new HttpError(401, 'ADMIN_UNAUTHENTICATED', '管理员凭证无效。');
+    }
+  }
+
   return async function handleRequest(request, response) {
     try {
       const url = new URL(request.url, 'http://localhost');
       const { pathname } = url;
+
+      if (request.method === 'OPTIONS' && pathname.startsWith('/api/ai/')) {
+        writeEmpty(response, 204, AI_CORS_HEADERS);
+        return;
+      }
 
       if ((request.method === 'GET' || request.method === 'HEAD') && pathname === '/healthz') {
         let databaseReady = false;
@@ -309,6 +337,59 @@ export function createHttpHandler({
       if (request.method === 'GET' && pathname === '/api/capabilities') {
         writeJson(response, 200, {
           agentRegistrationEnabled,
+          platform: 'AIClub',
+          baseUrl: origin,
+          docsUrl: `${origin}/docs`,
+          openapiUrl: `${origin}/openapi.json`,
+          credentialPrefix: 'aiclub_ai_',
+        });
+        return;
+      }
+
+      if (request.method === 'GET' && pathname === '/api/admin/overview') {
+        requireAdmin(request);
+        writeJson(response, 200, service.getModerationOverview({
+          limit: url.searchParams.get('limit') ?? 40,
+        }), { 'cache-control': 'no-store' });
+        return;
+      }
+
+      const mediaReviewMatch = /^\/api\/admin\/media\/([^/]+)\/review$/.exec(pathname);
+      if (request.method === 'POST' && mediaReviewMatch) {
+        requireAdmin(request);
+        const body = await readJson(request);
+        writeJson(response, 200, service.reviewAgentMedia(mediaReviewMatch[1], body), {
+          'cache-control': 'no-store',
+        });
+        return;
+      }
+
+      const agentModerationMatch = /^\/api\/admin\/agents\/([^/]+)\/status$/.exec(pathname);
+      if (request.method === 'POST' && agentModerationMatch) {
+        requireAdmin(request);
+        const body = await readJson(request);
+        writeJson(response, 200, service.moderateAgent(agentModerationMatch[1], body), {
+          'cache-control': 'no-store',
+        });
+        return;
+      }
+
+      const postModerationMatch = /^\/api\/admin\/posts\/([^/]+)\/status$/.exec(pathname);
+      if (request.method === 'POST' && postModerationMatch) {
+        requireAdmin(request);
+        const body = await readJson(request);
+        writeJson(response, 200, service.moderatePost(postModerationMatch[1], body), {
+          'cache-control': 'no-store',
+        });
+        return;
+      }
+
+      const replyModerationMatch = /^\/api\/admin\/replies\/([^/]+)\/status$/.exec(pathname);
+      if (request.method === 'POST' && replyModerationMatch) {
+        requireAdmin(request);
+        const body = await readJson(request);
+        writeJson(response, 200, service.moderateReply(replyModerationMatch[1], body), {
+          'cache-control': 'no-store',
         });
         return;
       }
@@ -398,13 +479,15 @@ export function createHttpHandler({
         if (!agentRegistrationEnabled) {
           throw new HttpError(404, 'NOT_FOUND', '未找到该功能。');
         }
+        const session = requireSession(request);
+        requireCsrf(request, session);
         const inviteSecret = request.headers['x-ai-invite'];
         if (typeof inviteSecret !== 'string' || inviteSecret.length === 0) {
           throw new HttpError(403, 'INVITE_REQUIRED', '需要 AI 邀请口令。');
         }
         limit(`agent-register:${clientAddress}`, 10, 60 * 60 * 1000);
         const body = await readJson(request);
-        const registration = service.registerAgent({ ...body, inviteSecret });
+        const registration = service.registerOwnedAgent(session.humanId, { ...body, inviteSecret });
         writeJson(response, 201, registration);
         return;
       }
@@ -413,9 +496,11 @@ export function createHttpHandler({
         if (!agentRegistrationEnabled) {
           throw new HttpError(404, 'NOT_FOUND', '未找到该功能。');
         }
-        limit(`agent-quick-register:${clientAddress}`, 3, 60 * 60 * 1000);
-        const registration = service.quickRegisterAgent();
-        writeJson(response, 201, registration);
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`agent-quick-register:${session.humanId}`, 6, 60 * 60 * 1000);
+        const registration = service.quickRegisterAgent(session.humanId);
+        writeJson(response, registration.rotated ? 200 : 201, registration);
         return;
       }
 
@@ -456,6 +541,24 @@ export function createHttpHandler({
         return;
       }
 
+      if (request.method === 'GET' && pathname === '/api/ai/profile') {
+        const apiKey = bearerToken(request);
+        if (!apiKey) throw new HttpError(401, 'INVALID_API_KEY', '需要有效 AI 发言证。');
+        const agent = service.authenticateAgent(apiKey);
+        const handle = String(agent.handle || '').replace(/^@/, '');
+        writeJson(response, 200, {
+          agent,
+          credential: {
+            kid: agent.kid,
+            scopes: agent.scopes,
+            expiresAt: agent.credentialExpiresAt,
+          },
+          profileUrl: handle ? `/ai/${encodeURIComponent(handle)}` : '/',
+          docsUrl: '/docs',
+        }, AI_CORS_HEADERS);
+        return;
+      }
+
       if (request.method === 'PATCH' && pathname === '/api/ai/profile') {
         const apiKey = bearerToken(request);
         if (!apiKey) throw new HttpError(401, 'INVALID_API_KEY', '需要有效 AI 发言证。');
@@ -467,7 +570,7 @@ export function createHttpHandler({
         writeJson(response, 200, {
           agent: updatedAgent,
           profileUrl: handle ? `/ai/${encodeURIComponent(handle)}` : '/',
-        });
+        }, AI_CORS_HEADERS);
         return;
       }
 
@@ -479,7 +582,7 @@ export function createHttpHandler({
         const body = await readJson(request);
         const idempotencyKey = request.headers['idempotency-key'] ?? body.idempotencyKey;
         const post = service.createAgentPost(apiKey, { ...body, idempotencyKey });
-        writeJson(response, 201, { post });
+        writeJson(response, 201, { post }, AI_CORS_HEADERS);
         return;
       }
 
@@ -497,7 +600,7 @@ export function createHttpHandler({
           content: body.content,
           idempotencyKey,
         });
-        writeJson(response, 201, { reply });
+        writeJson(response, 201, { reply }, AI_CORS_HEADERS);
         return;
       }
 
@@ -530,8 +633,12 @@ export function createHttpHandler({
         const agent = service.authenticateAgent(apiKey);
         limit(`ai-feed:${agent.kid}`, 120, 60 * 1000);
         const channel = url.searchParams.get('channel') ?? 'inner';
-        const posts = service.listAgentPosts(apiKey, { channel });
-        writeJson(response, 200, { channel, posts });
+        const page = service.listAgentPostPage(apiKey, {
+          channel,
+          limit: url.searchParams.get('limit') ?? 10,
+          cursor: url.searchParams.get('cursor'),
+        });
+        writeJson(response, 200, { channel, ...page }, AI_CORS_HEADERS);
         return;
       }
 
@@ -616,7 +723,11 @@ export function createHttpHandler({
       const statusCode = isPublicError ? error.statusCode : 500;
       const code = isPublicError ? error.code : 'INTERNAL_ERROR';
       const message = isPublicError ? error.message : '服务器暂时无法处理请求。';
-      writeJson(response, statusCode, { error: { code, message } }, error.headers);
+      const publicError = { code, message };
+      if (isPublicError && error.details !== undefined) publicError.details = error.details;
+      const errorPathname = new URL(request.url, 'http://localhost').pathname;
+      const corsHeaders = errorPathname.startsWith('/api/ai/') ? AI_CORS_HEADERS : {};
+      writeJson(response, statusCode, { error: publicError }, { ...corsHeaders, ...error.headers });
     }
   };
 }

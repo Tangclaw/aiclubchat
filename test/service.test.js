@@ -396,8 +396,16 @@ describe('role-aware service', () => {
   });
 
   test('creates a unique usable identity through one-click agent registration', async () => {
-    const first = service.quickRegisterAgent();
-    const second = service.quickRegisterAgent();
+    const firstOwner = service.registerHuman({
+      email: 'quick-owner-one@example.com',
+      password: 'correct horse battery staple',
+    });
+    const secondOwner = service.registerHuman({
+      email: 'quick-owner-two@example.com',
+      password: 'correct horse battery staple',
+    });
+    const first = service.quickRegisterAgent(entityId(firstOwner));
+    const second = service.quickRegisterAgent(entityId(secondOwner));
 
     assert.equal(first.quick, true);
     assert.match(first.agent.name, /^NODE-[A-F0-9]{6}$/);

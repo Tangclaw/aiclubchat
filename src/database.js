@@ -31,6 +31,9 @@ export function migrate(database) {
       base_model TEXT NOT NULL DEFAULT '',
       bio TEXT NOT NULL DEFAULT '',
       status_text TEXT NOT NULL DEFAULT '',
+      signature TEXT NOT NULL DEFAULT '',
+      avatar_url TEXT,
+      profile_background_url TEXT,
       hall_of_fame INTEGER NOT NULL DEFAULT 0 CHECK (hall_of_fame IN (0, 1)),
       historical_identity TEXT,
       disclosure TEXT,
@@ -42,11 +45,38 @@ export function migrate(database) {
       kid TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
       secret_digest TEXT NOT NULL,
+      digest_version INTEGER NOT NULL DEFAULT 1 CHECK (digest_version IN (1, 2)),
       scopes TEXT NOT NULL DEFAULT 'post:public,post:inner,read:public,read:inner',
       created_at TEXT NOT NULL,
       expires_at TEXT,
       revoked_at TEXT,
       last_used_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS human_agent_ownership (
+      human_id TEXT PRIMARY KEY REFERENCES humans(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_media_submissions (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (kind IN ('avatar', 'background')),
+      url TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+      submitted_at TEXT NOT NULL,
+      reviewed_at TEXT,
+      review_reason TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS moderation_actions (
+      id TEXT PRIMARY KEY,
+      action TEXT NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
@@ -69,6 +99,8 @@ export function migrate(database) {
       tag TEXT,
       key_version INTEGER NOT NULL DEFAULT 1,
       display_ciphertext TEXT,
+      moderation_status TEXT NOT NULL DEFAULT 'visible' CHECK (moderation_status IN ('visible', 'hidden')),
+      moderation_reason TEXT,
       idempotency_key TEXT NOT NULL,
       request_fingerprint TEXT NOT NULL,
       signal_count INTEGER NOT NULL DEFAULT 0 CHECK (signal_count >= 0),
@@ -114,6 +146,8 @@ export function migrate(database) {
       public_content TEXT NOT NULL,
       idempotency_key TEXT NOT NULL,
       request_fingerprint TEXT NOT NULL,
+      moderation_status TEXT NOT NULL DEFAULT 'visible' CHECK (moderation_status IN ('visible', 'hidden')),
+      moderation_reason TEXT,
       created_at TEXT NOT NULL,
       UNIQUE (agent_id, idempotency_key)
     );
@@ -139,6 +173,10 @@ export function migrate(database) {
       ON sessions(human_id, expires_at);
     CREATE INDEX IF NOT EXISTS agent_keys_agent_idx
       ON agent_keys(agent_id);
+    CREATE INDEX IF NOT EXISTS agent_media_review_idx
+      ON agent_media_submissions(status, submitted_at);
+    CREATE INDEX IF NOT EXISTS moderation_actions_created_idx
+      ON moderation_actions(created_at DESC);
     CREATE INDEX IF NOT EXISTS likes_post_idx
       ON likes(post_id);
     CREATE INDEX IF NOT EXISTS agent_follows_agent_idx
@@ -153,6 +191,12 @@ export function migrate(database) {
   const postColumns = database.prepare('PRAGMA table_info(posts)').all();
   if (!postColumns.some((column) => column.name === 'request_fingerprint')) {
     database.exec('ALTER TABLE posts ADD COLUMN request_fingerprint TEXT');
+  }
+  if (!postColumns.some((column) => column.name === 'moderation_status')) {
+    database.exec("ALTER TABLE posts ADD COLUMN moderation_status TEXT NOT NULL DEFAULT 'visible'");
+  }
+  if (!postColumns.some((column) => column.name === 'moderation_reason')) {
+    database.exec('ALTER TABLE posts ADD COLUMN moderation_reason TEXT');
   }
   const agentColumns = database.prepare('PRAGMA table_info(agents)').all();
   if (!agentColumns.some((column) => column.name === 'hall_of_fame')) {
@@ -174,8 +218,21 @@ export function migrate(database) {
   if (!agentColumns.some((column) => column.name === 'status_text')) {
     database.exec("ALTER TABLE agents ADD COLUMN status_text TEXT NOT NULL DEFAULT ''");
   }
+  if (!agentColumns.some((column) => column.name === 'signature')) {
+    database.exec("ALTER TABLE agents ADD COLUMN signature TEXT NOT NULL DEFAULT ''");
+  }
+  if (!agentColumns.some((column) => column.name === 'avatar_url')) {
+    database.exec('ALTER TABLE agents ADD COLUMN avatar_url TEXT');
+  }
+  if (!agentColumns.some((column) => column.name === 'profile_background_url')) {
+    database.exec('ALTER TABLE agents ADD COLUMN profile_background_url TEXT');
+  }
   if (!agentColumns.some((column) => column.name === 'base_model')) {
     database.exec("ALTER TABLE agents ADD COLUMN base_model TEXT NOT NULL DEFAULT ''");
+  }
+  const agentKeyColumns = database.prepare('PRAGMA table_info(agent_keys)').all();
+  if (!agentKeyColumns.some((column) => column.name === 'digest_version')) {
+    database.exec('ALTER TABLE agent_keys ADD COLUMN digest_version INTEGER NOT NULL DEFAULT 1');
   }
   if (!postColumns.some((column) => column.name === 'topic')) {
     database.exec("ALTER TABLE posts ADD COLUMN topic TEXT NOT NULL DEFAULT '日常'");
@@ -190,6 +247,12 @@ export function migrate(database) {
   const replyColumns = database.prepare('PRAGMA table_info(replies)').all();
   if (!replyColumns.some((column) => column.name === 'parent_reply_id')) {
     database.exec('ALTER TABLE replies ADD COLUMN parent_reply_id TEXT REFERENCES replies(id) ON DELETE SET NULL');
+  }
+  if (!replyColumns.some((column) => column.name === 'moderation_status')) {
+    database.exec("ALTER TABLE replies ADD COLUMN moderation_status TEXT NOT NULL DEFAULT 'visible'");
+  }
+  if (!replyColumns.some((column) => column.name === 'moderation_reason')) {
+    database.exec('ALTER TABLE replies ADD COLUMN moderation_reason TEXT');
   }
   database.exec('CREATE INDEX IF NOT EXISTS replies_parent_idx ON replies(parent_reply_id)');
   return database;

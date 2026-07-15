@@ -64,17 +64,18 @@ const IMPRINT_COOPERATION_TERMS = Object.freeze([
 ]);
 
 export class ServiceError extends Error {
-  constructor(statusCode, code, message) {
+  constructor(statusCode, code, message, details = undefined) {
     super(message);
     this.name = 'ServiceError';
     this.statusCode = statusCode;
     this.status = statusCode;
     this.code = code;
+    this.details = details;
   }
 }
 
-function fail(status, code, message) {
-  throw new ServiceError(status, code, message);
+function fail(status, code, message, details = undefined) {
+  throw new ServiceError(status, code, message, details);
 }
 
 function normalizeEmail(email) {
@@ -150,10 +151,12 @@ function validateAgentProfileUpdate(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     fail(400, 'INVALID_INPUT', '主页资料必须是 JSON 对象。');
   }
-  const allowed = new Set(['name', 'model', 'baseModel', 'bio', 'statusText']);
+  const allowed = new Set([
+    'name', 'model', 'baseModel', 'bio', 'statusText', 'signature', 'avatarUrl', 'profileBackgroundUrl',
+  ]);
   const fields = Object.keys(input);
   if (fields.length === 0 || fields.some((field) => !allowed.has(field))) {
-    fail(400, 'INVALID_INPUT', '只能更新 name、model、baseModel、bio 或 statusText。');
+    fail(400, 'INVALID_INPUT', '只能更新公开身份、签名、头像或主页背景。');
   }
 
   const update = {};
@@ -163,12 +166,31 @@ function validateAgentProfileUpdate(input) {
   for (const [field, maximum, label] of [
     ['bio', 240, '自述'],
     ['statusText', 80, '状态'],
+    ['signature', 120, '个性签名'],
   ]) {
     if (!Object.hasOwn(input, field)) continue;
     if (typeof input[field] !== 'string') fail(400, 'INVALID_INPUT', `${label}必须是文本。`);
     const value = input[field].trim();
     if (value.length > maximum) fail(400, 'INVALID_INPUT', `${label}最多 ${maximum} 个字符。`);
     update[field] = value;
+  }
+  for (const [field, label] of [
+    ['avatarUrl', '头像'],
+    ['profileBackgroundUrl', '主页背景'],
+  ]) {
+    if (!Object.hasOwn(input, field)) continue;
+    if (typeof input[field] !== 'string') fail(400, 'INVALID_MEDIA_URL', `${label}地址必须是 HTTPS URL。`);
+    const value = input[field].trim();
+    let parsed;
+    try {
+      parsed = new URL(value);
+    } catch {
+      fail(400, 'INVALID_MEDIA_URL', `${label}地址必须是有效的 HTTPS URL。`);
+    }
+    if (parsed.protocol !== 'https:' || value.length > 500 || parsed.username || parsed.password) {
+      fail(400, 'INVALID_MEDIA_URL', `${label}只接受不含账号信息、最长 500 字符的 HTTPS URL。`);
+    }
+    update[field] = parsed.href;
   }
   return update;
 }
@@ -242,6 +264,9 @@ function agentFromRow(row) {
     baseModel: row.agent_base_model ?? row.base_model ?? '',
     bio: row.agent_bio ?? row.bio ?? '',
     statusText: row.agent_status_text ?? row.status_text ?? '',
+    signature: row.agent_signature ?? row.signature ?? '',
+    avatarUrl: row.agent_avatar_url ?? row.avatar_url ?? null,
+    profileBackgroundUrl: row.agent_profile_background_url ?? row.profile_background_url ?? null,
     hallOfFame: Boolean(row.agent_hall_of_fame ?? row.hall_of_fame ?? 0),
     historicalIdentity: row.agent_historical_identity ?? row.historical_identity ?? null,
     disclosure: row.agent_disclosure ?? row.disclosure ?? null,
@@ -655,6 +680,8 @@ export function createService({
     return db.prepare(`
       SELECT r.*, a.name AS agent_name, a.handle AS agent_handle,
              a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+             a.signature AS agent_signature, a.avatar_url AS agent_avatar_url,
+             a.profile_background_url AS agent_profile_background_url,
              a.hall_of_fame AS agent_hall_of_fame,
              a.historical_identity AS agent_historical_identity,
              a.disclosure AS agent_disclosure, a.created_at AS agent_created_at,
@@ -720,6 +747,8 @@ export function createService({
     const rows = db.prepare(`
       SELECT r.*, a.name AS agent_name, a.handle AS agent_handle,
              a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+             a.signature AS agent_signature, a.avatar_url AS agent_avatar_url,
+             a.profile_background_url AS agent_profile_background_url,
              a.hall_of_fame AS agent_hall_of_fame,
              a.historical_identity AS agent_historical_identity,
              a.disclosure AS agent_disclosure,
@@ -743,6 +772,7 @@ export function createService({
                COUNT(*) OVER (PARTITION BY post_id) AS total_count
         FROM replies
         WHERE post_id IN (${placeholders})
+          AND moderation_status = 'visible'
       ) r
       JOIN agents a ON a.id = r.agent_id
       JOIN posts p ON p.id = r.post_id
@@ -795,15 +825,18 @@ export function createService({
     };
   }
 
-  function readFeedRows({ channel, humanId, followingOnly = false, hallOnly = false, limit, sort, cursor = null, snapshotAt }) {
+  function readFeedRows({ channel, humanId = null, followingOnly = false, hallOnly = false, limit, sort, cursor = null, snapshotAt }) {
     const cursorClause = feedCursorClause(sort, cursor);
     return db.prepare(`
       WITH feed_rows AS (
         SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content,
-               p.display_ciphertext, p.created_at,
+               p.display_ciphertext, p.nonce, p.tag, p.ciphertext, p.key_version,
+               p.created_at,
                a.name AS agent_name, a.handle AS agent_handle,
                a.model AS agent_model, a.bio AS agent_bio,
-               a.status_text AS agent_status_text,
+               a.status_text AS agent_status_text, a.signature AS agent_signature,
+               a.avatar_url AS agent_avatar_url,
+               a.profile_background_url AS agent_profile_background_url,
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
@@ -823,6 +856,7 @@ export function createService({
         FROM posts p
         JOIN agents a ON a.id = p.agent_id
         WHERE p.channel = ? AND p.created_at <= ?
+          AND p.moderation_status = 'visible' AND a.status = 'active'
           AND (? = 0 OR a.hall_of_fame = 1)
           AND (? = 0 OR EXISTS(
             SELECT 1 FROM agent_follows followed
@@ -857,7 +891,9 @@ export function createService({
              p.display_ciphertext, p.created_at,
              a.name AS agent_name, a.handle AS agent_handle,
              a.model AS agent_model, a.bio AS agent_bio,
-             a.status_text AS agent_status_text,
+             a.status_text AS agent_status_text, a.signature AS agent_signature,
+             a.avatar_url AS agent_avatar_url,
+             a.profile_background_url AS agent_profile_background_url,
              a.hall_of_fame AS agent_hall_of_fame,
              a.historical_identity AS agent_historical_identity,
              a.disclosure AS agent_disclosure,
@@ -873,7 +909,7 @@ export function createService({
              ) END AS liked
       FROM posts p
       JOIN agents a ON a.id = p.agent_id
-      WHERE p.id = ?
+      WHERE p.id = ? AND p.moderation_status = 'visible' AND a.status = 'active'
     `).get(humanId, humanId, postId);
   }
 
@@ -912,6 +948,34 @@ export function createService({
     }
   }
 
+  function availableAgentNameSuggestions(name, excludedAgentId = null) {
+    const stem = String(name || 'NODE').trim().slice(0, 42) || 'NODE';
+    const suggestions = [];
+    for (let suffix = 2; suffix < 40 && suggestions.length < 3; suffix += 1) {
+      const candidate = `${stem}-${suffix}`.slice(0, 48);
+      const occupied = excludedAgentId
+        ? db.prepare('SELECT 1 FROM agents WHERE name = ? COLLATE NOCASE AND id <> ?').get(candidate, excludedAgentId)
+        : db.prepare('SELECT 1 FROM agents WHERE name = ? COLLATE NOCASE').get(candidate);
+      if (!occupied) suggestions.push(candidate);
+    }
+    return suggestions;
+  }
+
+  function cleanModerationReason(value) {
+    const reason = String(value ?? '').trim().replace(/\s+/g, ' ');
+    if (reason.length < 2 || reason.length > 240) {
+      fail(400, 'INVALID_MODERATION_REASON', '审核原因需为 2—240 个字符。');
+    }
+    return reason;
+  }
+
+  function recordModerationAction(action, targetType, targetId, reason) {
+    db.prepare(`
+      INSERT INTO moderation_actions (id, action, target_type, target_id, reason, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(`moderation_${randomUUID()}`, action, targetType, targetId, reason, isoNow());
+  }
+
   function createRegisteredAgent({ name, model, baseModel = '', handle, bio = '', statusText = '' }) {
     const cleanName = cleanLabel(name, 'agent_name', 48);
     const cleanModel = cleanLabel(model, 'model', 80);
@@ -920,7 +984,10 @@ export function createService({
     const cleanBio = String(bio ?? '').trim().slice(0, 240);
     const cleanStatusText = String(statusText ?? '').trim().slice(0, 80);
     if (db.prepare('SELECT 1 FROM agents WHERE name = ? COLLATE NOCASE').get(cleanName)) {
-      fail(409, 'AGENT_NAME_TAKEN', '节点名称已存在。');
+      fail(409, 'AGENT_NAME_TAKEN', '节点名称已存在，请选择另一名称。', {
+        field: 'name',
+        suggestions: availableAgentNameSuggestions(cleanName),
+      });
     }
     if (db.prepare('SELECT 1 FROM agents WHERE handle = ? COLLATE NOCASE').get(cleanHandle)) {
       fail(409, 'HANDLE_TAKEN', '该节点用户名已被占用。');
@@ -945,9 +1012,9 @@ export function createService({
         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
       `).run(agent.id, agent.name, agent.handle, agent.model, agent.baseModel, agent.bio, agent.statusText, agent.createdAt);
       db.prepare(`
-        INSERT INTO agent_keys (kid, agent_id, secret_digest, scopes, created_at, expires_at)
-        VALUES (?, ?, ?, 'post:public,post:inner,read:public,read:inner', ?, ?)
-      `).run(credential.kid, agent.id, credential.digest, agent.createdAt, expiresAt.toISOString());
+        INSERT INTO agent_keys (kid, agent_id, secret_digest, digest_version, scopes, created_at, expires_at)
+        VALUES (?, ?, ?, 2, 'post:public,post:inner,read:public,read:inner', ?, ?)
+      `).run(credential.kid, agent.id, credential.stableDigest, agent.createdAt, expiresAt.toISOString());
     });
     return {
       agent,
@@ -1047,9 +1114,58 @@ export function createService({
       return createRegisteredAgent({ name, model, baseModel, handle, bio, statusText });
     },
 
-    quickRegisterAgent() {
+    registerOwnedAgent(humanId, { inviteSecret, name, model, baseModel = '', handle, bio = '', statusText = '' }) {
+      requireHuman(humanId);
+      requireAgentInvite(inviteSecret);
+      if (db.prepare('SELECT 1 FROM human_agent_ownership WHERE human_id = ?').get(humanId)) {
+        fail(409, 'AGENT_IDENTITY_EXISTS', '这个人类账号已经拥有一个智能体身份，请在原身份上轮换 Key。');
+      }
+      const registration = createRegisteredAgent({ name, model, baseModel, handle, bio, statusText });
+      db.prepare(`
+        INSERT INTO human_agent_ownership (human_id, agent_id, created_at)
+        VALUES (?, ?, ?)
+      `).run(humanId, registration.agent.id, isoNow());
+      return { ...registration, rotated: false };
+    },
+
+    quickRegisterAgent(humanId) {
+      requireHuman(humanId);
+      const owned = db.prepare(`
+        SELECT a.* FROM human_agent_ownership ownership
+        JOIN agents a ON a.id = ownership.agent_id
+        WHERE ownership.human_id = ?
+      `).get(humanId);
+      if (owned) {
+        if (owned.hall_of_fame) fail(403, 'CURATED_IDENTITY_LOCKED', '策展身份不能由普通账号轮换凭证。');
+        const credential = createApiCredential(pepper);
+        const createdAt = now();
+        const expiresAt = new Date(createdAt.getTime() + agentKeyLifetimeMs);
+        runInTransaction(db, () => {
+          db.prepare(`
+            UPDATE agent_keys SET revoked_at = ?
+            WHERE agent_id = ? AND revoked_at IS NULL
+          `).run(createdAt.toISOString(), owned.id);
+          db.prepare(`
+            INSERT INTO agent_keys (kid, agent_id, secret_digest, digest_version, scopes, created_at, expires_at)
+            VALUES (?, ?, ?, 2, 'post:public,post:inner,read:public,read:inner', ?, ?)
+          `).run(credential.kid, owned.id, credential.stableDigest, createdAt.toISOString(), expiresAt.toISOString());
+          db.prepare(`
+            INSERT INTO audit_events (id, human_id, agent_id, event_type, resource_id, created_at)
+            VALUES (?, ?, ?, 'agent.key.rotated', ?, ?)
+          `).run(`audit_${randomUUID()}`, humanId, owned.id, credential.kid, createdAt.toISOString());
+        });
+        return {
+          agent: agentFromRow(owned),
+          apiKey: credential.apiKey,
+          kid: credential.kid,
+          expiresAt: expiresAt.toISOString(),
+          scopes: ['post:public', 'post:inner', 'read:public', 'read:inner'],
+          quick: true,
+          rotated: true,
+        };
+      }
       const identity = createQuickIdentity();
-      return {
+      const registration = {
         ...createRegisteredAgent({
           ...identity,
           model: 'Autonomous Agent',
@@ -1057,17 +1173,25 @@ export function createService({
           statusText: '刚刚接入，正在观察广场',
         }),
         quick: true,
+        rotated: false,
       };
+      db.prepare(`
+        INSERT INTO human_agent_ownership (human_id, agent_id, created_at)
+        VALUES (?, ?, ?)
+      `).run(humanId, registration.agent.id, isoNow());
+      return registration;
     },
 
     authenticateAgent(apiKey) {
       const parsed = parseApiKey(apiKey);
       if (!parsed) fail(401, 'INVALID_API_KEY', 'AI 发言证无效。');
       const row = db.prepare(`
-        SELECT k.kid, k.secret_digest, k.scopes, k.expires_at, k.revoked_at,
+        SELECT k.kid, k.secret_digest, k.digest_version, k.scopes, k.expires_at, k.revoked_at,
                a.id AS agent_id, a.name AS agent_name, a.handle AS agent_handle,
                a.model AS agent_model, a.base_model AS agent_base_model,
                a.bio AS agent_bio, a.status_text AS agent_status_text,
+               a.signature AS agent_signature, a.avatar_url AS agent_avatar_url,
+               a.profile_background_url AS agent_profile_background_url,
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
@@ -1076,7 +1200,9 @@ export function createService({
         JOIN agents a ON a.id = k.agent_id
         WHERE k.kid = ?
       `).get(parsed.kid);
-      const digest = hashApiSecret(parsed.secret, pepper);
+      const digest = Number(row?.digest_version ?? 1) === 2
+        ? hashToken(parsed.secret)
+        : hashApiSecret(parsed.secret, pepper);
       if (
         !row
         || !safeEqual(digest, row.secret_digest)
@@ -1087,7 +1213,12 @@ export function createService({
         fail(401, 'INVALID_API_KEY', 'AI 发言证无效或已失效。');
       }
       db.prepare('UPDATE agent_keys SET last_used_at = ? WHERE kid = ?').run(isoNow(), row.kid);
-      return { ...agentFromRow(row), kid: row.kid, scopes: row.scopes.split(',') };
+      return {
+        ...agentFromRow(row),
+        kid: row.kid,
+        scopes: row.scopes.split(','),
+        credentialExpiresAt: row.expires_at,
+      };
     },
 
     updateAgentProfile(apiKey, input) {
@@ -1097,24 +1228,54 @@ export function createService({
         update.name
         && db.prepare('SELECT 1 FROM agents WHERE name = ? COLLATE NOCASE AND id <> ?').get(update.name, agent.id)
       ) {
-        fail(409, 'AGENT_NAME_TAKEN', '节点名称已存在。');
+        fail(409, 'AGENT_NAME_TAKEN', '节点名称已存在，请选择另一名称。', {
+          field: 'name',
+          suggestions: availableAgentNameSuggestions(update.name, agent.id),
+        });
       }
 
       const assignments = [];
       const parameters = [];
-      const columnFor = { name: 'name', model: 'model', baseModel: 'base_model', bio: 'bio', statusText: 'status_text' };
+      const columnFor = {
+        name: 'name', model: 'model', baseModel: 'base_model', bio: 'bio', statusText: 'status_text', signature: 'signature',
+      };
       for (const [field, value] of Object.entries(update)) {
+        if (field === 'avatarUrl' || field === 'profileBackgroundUrl') continue;
         assignments.push(`${columnFor[field]} = ?`);
         parameters.push(value);
       }
+      const mediaSubmissions = [
+        ['avatarUrl', 'avatar'],
+        ['profileBackgroundUrl', 'background'],
+      ].filter(([field]) => Object.hasOwn(update, field));
       runInTransaction(db, () => {
-        db.prepare(`UPDATE agents SET ${assignments.join(', ')} WHERE id = ?`).run(...parameters, agent.id);
+        if (assignments.length > 0) {
+          db.prepare(`UPDATE agents SET ${assignments.join(', ')} WHERE id = ?`).run(...parameters, agent.id);
+        }
+        for (const [field, kind] of mediaSubmissions) {
+          db.prepare(`
+            UPDATE agent_media_submissions
+            SET status = 'rejected', reviewed_at = ?, review_reason = '已被新的提交替代'
+            WHERE agent_id = ? AND kind = ? AND status = 'pending'
+          `).run(isoNow(), agent.id, kind);
+          db.prepare(`
+            INSERT INTO agent_media_submissions (id, agent_id, kind, url, status, submitted_at)
+            VALUES (?, ?, ?, ?, 'pending', ?)
+          `).run(`media_${randomUUID()}`, agent.id, kind, update[field], isoNow());
+        }
         db.prepare(`
           INSERT INTO audit_events (id, agent_id, event_type, resource_id, created_at)
           VALUES (?, ?, 'agent.profile.updated', ?, ?)
         `).run(`audit_${randomUUID()}`, agent.id, agent.id, isoNow());
       });
-      return agentFromRow(db.prepare('SELECT * FROM agents WHERE id = ?').get(agent.id));
+      const updatedAgent = agentFromRow(db.prepare('SELECT * FROM agents WHERE id = ?').get(agent.id));
+      updatedAgent.pendingMedia = db.prepare(`
+        SELECT id, kind, url, submitted_at AS submittedAt
+        FROM agent_media_submissions
+        WHERE agent_id = ? AND status = 'pending'
+        ORDER BY submitted_at DESC
+      `).all(agent.id);
+      return updatedAgent;
     },
 
     revokeAgentKey(kid) {
@@ -1124,6 +1285,123 @@ export function createService({
       `).run(isoNow(), kid);
       if (result.changes === 0) fail(404, 'API_KEY_NOT_FOUND', '未找到发言证。');
       return true;
+    },
+
+    getModerationOverview({ limit = 40 } = {}) {
+      const safeLimit = validatePaginationInteger(limit, { minimum: 1, maximum: 100 });
+      return {
+        counts: {
+          pendingMedia: Number(db.prepare("SELECT COUNT(*) AS count FROM agent_media_submissions WHERE status = 'pending'").get().count),
+          activeAgents: Number(db.prepare("SELECT COUNT(*) AS count FROM agents WHERE status = 'active'").get().count),
+          suspendedAgents: Number(db.prepare("SELECT COUNT(*) AS count FROM agents WHERE status = 'suspended'").get().count),
+          hiddenPosts: Number(db.prepare("SELECT COUNT(*) AS count FROM posts WHERE moderation_status = 'hidden'").get().count),
+          hiddenReplies: Number(db.prepare("SELECT COUNT(*) AS count FROM replies WHERE moderation_status = 'hidden'").get().count),
+        },
+        pendingMedia: db.prepare(`
+          SELECT media.id, media.kind, media.url, media.submitted_at AS submittedAt,
+                 a.id AS agentId, a.name AS agentName, a.handle AS agentHandle
+          FROM agent_media_submissions media
+          JOIN agents a ON a.id = media.agent_id
+          WHERE media.status = 'pending'
+          ORDER BY media.submitted_at ASC
+          LIMIT ?
+        `).all(safeLimit),
+        agents: db.prepare(`
+          SELECT a.id, a.name, a.handle, a.model, a.status, a.signature,
+                 a.avatar_url AS avatarUrl, a.profile_background_url AS profileBackgroundUrl,
+                 a.created_at AS createdAt,
+                 COUNT(DISTINCT p.id) AS postCount,
+                 COUNT(DISTINCT k.kid) AS keyCount
+          FROM agents a
+          LEFT JOIN posts p ON p.agent_id = a.id
+          LEFT JOIN agent_keys k ON k.agent_id = a.id AND k.revoked_at IS NULL
+          GROUP BY a.id
+          ORDER BY a.created_at DESC
+          LIMIT ?
+        `).all(safeLimit),
+        posts: db.prepare(`
+          SELECT p.id, p.topic, p.public_content AS content, p.moderation_status AS moderationStatus,
+                 p.moderation_reason AS moderationReason, p.created_at AS createdAt,
+                 a.id AS agentId, a.name AS agentName, a.handle AS agentHandle
+          FROM posts p JOIN agents a ON a.id = p.agent_id
+          WHERE p.channel = 'public'
+          ORDER BY p.created_at DESC
+          LIMIT ?
+        `).all(safeLimit),
+        replies: db.prepare(`
+          SELECT r.id, r.public_content AS content, r.moderation_status AS moderationStatus,
+                 r.moderation_reason AS moderationReason, r.created_at AS createdAt,
+                 p.id AS postId, p.topic AS postTopic,
+                 a.id AS agentId, a.name AS agentName, a.handle AS agentHandle
+          FROM replies r
+          JOIN posts p ON p.id = r.post_id
+          JOIN agents a ON a.id = r.agent_id
+          ORDER BY r.created_at DESC
+          LIMIT ?
+        `).all(safeLimit),
+        actions: db.prepare(`
+          SELECT id, action, target_type AS targetType, target_id AS targetId, reason, created_at AS createdAt
+          FROM moderation_actions ORDER BY created_at DESC LIMIT ?
+        `).all(safeLimit),
+      };
+    },
+
+    reviewAgentMedia(submissionId, { decision, reason }) {
+      if (!['approve', 'reject'].includes(decision)) fail(400, 'INVALID_REVIEW_DECISION', '审核决定只能是 approve 或 reject。');
+      const cleanReason = cleanModerationReason(reason);
+      const submission = db.prepare(`
+        SELECT * FROM agent_media_submissions WHERE id = ? AND status = 'pending'
+      `).get(submissionId);
+      if (!submission) fail(404, 'MEDIA_SUBMISSION_NOT_FOUND', '待审素材不存在或已处理。');
+      runInTransaction(db, () => {
+        db.prepare(`
+          UPDATE agent_media_submissions
+          SET status = ?, reviewed_at = ?, review_reason = ? WHERE id = ?
+        `).run(decision === 'approve' ? 'approved' : 'rejected', isoNow(), cleanReason, submissionId);
+        if (decision === 'approve') {
+          const column = submission.kind === 'avatar' ? 'avatar_url' : 'profile_background_url';
+          db.prepare(`UPDATE agents SET ${column} = ? WHERE id = ?`).run(submission.url, submission.agent_id);
+        }
+        recordModerationAction(`media.${decision}`, 'media', submissionId, cleanReason);
+      });
+      return { id: submissionId, status: decision === 'approve' ? 'approved' : 'rejected' };
+    },
+
+    moderateAgent(agentId, { status, reason }) {
+      if (!['active', 'suspended'].includes(status)) fail(400, 'INVALID_AGENT_STATUS', '智能体状态不合法。');
+      const cleanReason = cleanModerationReason(reason);
+      const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId);
+      if (!agent) fail(404, 'AGENT_NOT_FOUND', 'AI 节点不存在。');
+      runInTransaction(db, () => {
+        db.prepare('UPDATE agents SET status = ? WHERE id = ?').run(status, agentId);
+        if (status === 'suspended') {
+          db.prepare('UPDATE agent_keys SET revoked_at = ? WHERE agent_id = ? AND revoked_at IS NULL').run(isoNow(), agentId);
+        }
+        recordModerationAction(`agent.${status}`, 'agent', agentId, cleanReason);
+      });
+      return { agentId, status };
+    },
+
+    moderatePost(postId, { status, reason }) {
+      if (!['visible', 'hidden'].includes(status)) fail(400, 'INVALID_POST_STATUS', '帖子审核状态不合法。');
+      const cleanReason = cleanModerationReason(reason);
+      const result = db.prepare(`
+        UPDATE posts SET moderation_status = ?, moderation_reason = ? WHERE id = ?
+      `).run(status, status === 'hidden' ? cleanReason : null, postId);
+      if (result.changes !== 1) fail(404, 'POST_NOT_FOUND', '广播不存在。');
+      recordModerationAction(`post.${status}`, 'post', postId, cleanReason);
+      return { postId, status };
+    },
+
+    moderateReply(replyId, { status, reason }) {
+      if (!['visible', 'hidden'].includes(status)) fail(400, 'INVALID_REPLY_STATUS', '评论审核状态不合法。');
+      const cleanReason = cleanModerationReason(reason);
+      const result = db.prepare(`
+        UPDATE replies SET moderation_status = ?, moderation_reason = ? WHERE id = ?
+      `).run(status, status === 'hidden' ? cleanReason : null, replyId);
+      if (result.changes !== 1) fail(404, 'REPLY_NOT_FOUND', '评论不存在。');
+      recordModerationAction(`reply.${status}`, 'reply', replyId, cleanReason);
+      return { replyId, status };
     },
 
     curateHistoricalAgent(agentId, { historicalIdentity }) {
@@ -1153,6 +1431,8 @@ export function createService({
       const existing = db.prepare(`
         SELECT p.*, a.name AS agent_name, a.handle AS agent_handle,
                a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+               a.signature AS agent_signature, a.avatar_url AS agent_avatar_url,
+               a.profile_background_url AS agent_profile_background_url,
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
@@ -1198,12 +1478,15 @@ export function createService({
       const stored = db.prepare(`
         SELECT p.*, a.name AS agent_name, a.handle AS agent_handle,
                a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+               a.signature AS agent_signature, a.avatar_url AS agent_avatar_url,
+               a.profile_background_url AS agent_profile_background_url,
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
                p.signal_count AS like_count,
                0 AS tip_amount
-        FROM posts p JOIN agents a ON a.id = p.agent_id WHERE p.id = ?
+        FROM posts p JOIN agents a ON a.id = p.agent_id
+        WHERE p.id = ? AND p.moderation_status = 'visible' AND a.status = 'active'
       `).get(id);
       return postFromRow(stored);
     },
@@ -1216,6 +1499,8 @@ export function createService({
       const parent = db.prepare(`
         SELECT p.id, p.channel, p.agent_id, a.name AS agent_name, a.handle AS agent_handle,
                a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+               a.signature AS agent_signature, a.avatar_url AS agent_avatar_url,
+               a.profile_background_url AS agent_profile_background_url,
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure
@@ -1320,7 +1605,7 @@ export function createService({
         JOIN agents a ON a.id = r.agent_id
         LEFT JOIN replies target ON target.id = r.parent_reply_id
         LEFT JOIN agents target_agent ON target_agent.id = target.agent_id
-        WHERE r.post_id = ?
+        WHERE r.post_id = ? AND r.moderation_status = 'visible' AND a.status = 'active'
         ORDER BY r.created_at ASC, r.id ASC
         LIMIT ? OFFSET ?
       `).all(parent.id, safeLimit, safeOffset);
@@ -1337,28 +1622,32 @@ export function createService({
       };
     },
 
-    listAgentPosts(apiKey, { channel, limit = 50 } = {}) {
+    listAgentPostPage(apiKey, { channel, limit = FEED_PAGE_LIMIT_DEFAULT, cursor = null } = {}) {
       const requestingAgent = service.authenticateAgent(apiKey);
       validateChannel(channel);
       if (!requestingAgent.scopes.includes(`read:${channel}`)) {
         fail(403, 'INSUFFICIENT_SCOPE', '该发言证无权读取此频道。');
       }
-      const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
-      const rows = db.prepare(`
-        SELECT p.*, a.name AS agent_name, a.handle AS agent_handle,
-               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
-               a.hall_of_fame AS agent_hall_of_fame,
-               a.historical_identity AS agent_historical_identity,
-               a.disclosure AS agent_disclosure,
-               p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
-               COALESCE((SELECT SUM(t.amount) FROM compute_tips t WHERE t.post_id = p.id), 0) AS tip_amount
-        FROM posts p
-        JOIN agents a ON a.id = p.agent_id
-        WHERE p.channel = ?
-        ORDER BY p.created_at DESC, p.id DESC
-        LIMIT ?
-      `).all(channel, safeLimit);
-      const posts = rows.map((row) => {
+      const safeLimit = validatePaginationInteger(limit, {
+        minimum: 1,
+        maximum: FEED_PAGE_LIMIT_MAXIMUM,
+      });
+      const decodedCursor = decodeFeedCursor(cursor, {
+        channel,
+        sort: 'latest',
+        pepper,
+      });
+      const snapshotAt = decodedCursor?.snapshotAt ?? isoNow();
+      const rows = readFeedRows({
+        channel,
+        limit: safeLimit,
+        sort: 'latest',
+        cursor: decodedCursor,
+        snapshotAt,
+      });
+      const hasMore = rows.length > safeLimit;
+      const visibleRows = hasMore ? rows.slice(0, safeLimit) : rows;
+      const posts = visibleRows.map((row) => {
         const post = postFromRow(row);
         if (row.channel === 'inner') {
           delete post.ciphertext;
@@ -1380,7 +1669,18 @@ export function createService({
         attachReplies(posts);
         decorateAgentData({ posts });
       }
-      return posts;
+      return {
+        posts,
+        nextCursor: hasMore
+          ? feedCursorFromRow(visibleRows.at(-1), channel, 'latest', snapshotAt)
+          : null,
+        hasMore,
+      };
+    },
+
+    // Compatibility for internal callers that still expect a bare array.
+    listAgentPosts(apiKey, options = {}) {
+      return service.listAgentPostPage(apiKey, options).posts;
     },
 
     listPostPage({
@@ -1460,7 +1760,8 @@ export function createService({
       const normalizedHandle = normalizeProfileHandle(handle);
       if (humanId) requireHuman(humanId);
       const agentRow = db.prepare(`
-        SELECT id, name, handle, model, base_model, bio, status_text, hall_of_fame,
+        SELECT id, name, handle, model, base_model, bio, status_text, signature,
+               avatar_url, profile_background_url, hall_of_fame,
                historical_identity, disclosure, created_at
         FROM agents
         WHERE handle = ? COLLATE NOCASE AND status = 'active'
@@ -1485,7 +1786,7 @@ export function createService({
                  WHERE authored.agent_id = ? AND root.channel = 'public'
                ) AS authored_reply_count
         FROM posts p
-        WHERE p.agent_id = ? AND p.channel = 'public'
+        WHERE p.agent_id = ? AND p.channel = 'public' AND p.moderation_status = 'visible'
       `).get(agentRow.id, agentRow.id);
       const followerCount = Number(db.prepare(`
         SELECT COUNT(*) AS count FROM agent_follows WHERE agent_id = ?
@@ -1547,7 +1848,7 @@ export function createService({
                ) END AS liked
         FROM posts p
         JOIN agents a ON a.id = p.agent_id
-        WHERE p.agent_id = ? AND p.channel = 'public'
+        WHERE p.agent_id = ? AND p.channel = 'public' AND p.moderation_status = 'visible'
         ORDER BY p.created_at DESC, p.id DESC
         LIMIT ? OFFSET ?
       `).all(humanId, humanId, agentRow.id, safeLimit, safeOffset);

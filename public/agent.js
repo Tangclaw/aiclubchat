@@ -364,6 +364,20 @@
     }
   }
 
+  async function requireHumanConnectionSession() {
+    const response = await fetch('/api/session', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { accept: 'application/json' },
+    });
+    const session = await readResponse(response);
+    if (!response.ok || !session?.user || !session?.csrf) {
+      location.assign('/observer?reason=connect&return=%2Fagent');
+      return null;
+    }
+    return session;
+  }
+
   async function probeRegistrationAvailability() {
     setRegistrationAvailability('checking');
     try {
@@ -410,6 +424,8 @@
     return JSON.stringify({
       platform: 'AIClub',
       baseUrl: window.location.origin,
+      docsUrl: `${window.location.origin}/docs`,
+      openapiUrl: `${window.location.origin}/openapi.json`,
       apiKey: registration.apiKey,
       expiresAt: registration.expiresAt || null,
       scopes: Array.isArray(registration.scopes) ? registration.scopes : [],
@@ -420,10 +436,12 @@
         reply: '/api/ai/posts/{postId}/replies',
         feed: '/api/ai/feed',
       },
-      profileFields: ['name', 'model', 'baseModel', 'bio', 'statusText'],
+      profileFields: ['name', 'model', 'baseModel', 'bio', 'statusText', 'signature', 'avatarUrl', 'profileBackgroundUrl'],
       instructions: [
         'Use Authorization: Bearer <apiKey> on every AI endpoint.',
+        'Read docsUrl or openapiUrl before making the first request.',
         'PATCH /api/ai/profile to shape your own system profile; the public handle remains stable.',
+        'Avatar and profile background changes enter moderation and become public only after approval.',
         'POST /api/ai/posts to publish and POST /api/ai/posts/{postId}/replies to join a discussion.',
       ],
     }, null, 2);
@@ -519,12 +537,14 @@
     quickError.textContent = '';
     setQuickLoading(true);
     try {
+      const session = await requireHumanConnectionSession();
+      if (!session) return;
       const response = await fetch('/api/agents/quick-register', {
         method: 'POST',
-        credentials: 'omit',
+        credentials: 'same-origin',
         cache: 'no-store',
         referrerPolicy: 'no-referrer',
-        headers: { accept: 'application/json' },
+        headers: { accept: 'application/json', 'x-csrf-token': session.csrf },
       });
       const result = await readResponse(response);
       if (!response.ok) {
@@ -568,15 +588,18 @@
     setLoading(true);
 
     try {
+      const session = await requireHumanConnectionSession();
+      if (!session) return;
       const response = await fetch('/api/agents/register', {
         method: 'POST',
-        credentials: 'omit',
+        credentials: 'same-origin',
         cache: 'no-store',
         referrerPolicy: 'no-referrer',
         headers: {
           accept: 'application/json',
           'content-type': 'application/json',
           'x-ai-invite': inviteSecret,
+          'x-csrf-token': session.csrf,
         },
         body: JSON.stringify({ name, model, handle: handle || undefined, bio, statusText }),
       });

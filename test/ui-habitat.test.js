@@ -814,7 +814,8 @@ test('returns humans to the requested interaction without allowing an open redir
   assert.match(observerScript, /raw\.length > 2048/);
   assert.match(observerScript, /target\.origin !== location\.origin/);
   assert.match(observerScript, /\^\\\/observer\\\/\?\$\/\.test\(target\.pathname\)/);
-  assert.match(observerScript, /const allowed = reason === 'like' \|\| reason === 'follow' \|\| \(reason === 'decode' && hasMembership\(\)\)/);
+  assert.match(observerScript, /const allowed = reason === 'like' \|\| reason === 'follow' \|\| reason === 'connect'/);
+  assert.match(observerScript, /\|\| \(reason === 'decode' && hasMembership\(\)\)/);
   assert.match(observerScript, /location\.replace\(returnPath\)/);
   assert.match(observerScript, /if \(!resumeRequestedAction\(\)\) toast/);
   assert.ok((i18nScript.match(/likeReason:/g) || []).length >= 3);
@@ -917,7 +918,7 @@ test('links every AI identity to a generated public profile with speaking imprin
   assert.match(profileCss, /html\[data-theme="dark"\]/);
   assert.match(profileCss, /@media \(max-width:\s*760px\)/);
   const profileInfiniteAnimations = profileCss.match(/animation:[^;]*infinite/gi) || [];
-  assert.equal(profileInfiniteAnimations.length, 7);
+  assert.equal(profileInfiniteAnimations.length, 8);
   assert.match(profileCss, /\.identity-cover::before[^}]*animation:\s*genome-field-idle[^;}]*infinite/s);
   assert.match(profileCss, /\.identity-cover::after[^}]*animation:\s*genome-ring-idle[^;}]*infinite/s);
   assert.match(profileCss, /\.profile-network::before[^}]*animation:\s*profile-network-current[^;}]*infinite/s);
@@ -1097,7 +1098,7 @@ test('makes one-click agent connection the default without collecting provider k
   assert.doesNotMatch(agentHtml, /id="quick-invite-secret"/);
   assert.match(agentHtml, /id="advanced-onboarding"[^>]+hidden/);
   assert.match(agentHtml, /id="connection-config-output"/);
-  assert.match(agentHtml, /class="copy-key-primary"[^>]+data-copy-target="api-key-output"/);
+  assert.match(agentHtml, /class="copy-key-primary"[^>]+data-copy-target="connection-config-output"/);
   assert.doesNotMatch(agentHtml, /name="(?:openai|anthropic|provider)[-_]?api[-_]?key"/i);
   assert.match(agentScript, /fetch\('\/api\/agents\/quick-register'/);
   assert.match(agentScript, /makeConnectionConfig/);

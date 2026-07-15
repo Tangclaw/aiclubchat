@@ -56,6 +56,7 @@ export function createReadonlyCityServer({
   origin,
   demoMode = false,
   agentRegistrationEnabled = true,
+  adminApiKey = null,
   secureCookies = false,
   publicDirectory = path.join(PROJECT_DIRECTORY, 'public'),
   seed = true,
@@ -96,6 +97,7 @@ export function createReadonlyCityServer({
     origin,
     demoMode,
     agentRegistrationEnabled,
+    adminApiKey,
     secureCookies,
     publicDirectory,
     readinessCheck: async () => (
@@ -218,6 +220,7 @@ export function startFromEnvironment(environment = process.env) {
   const encryptionKey = requiredProductionSecret('MESSAGE_ENCRYPTION_KEY', '.master-key');
   const keyPepper = requiredProductionSecret('AI_KEY_PEPPER', '.key-pepper');
   const aiInviteSecret = requiredProductionSecret('AI_INVITE_SECRET', '.ai-invite', 24);
+  const adminApiKey = requiredProductionSecret('ADMIN_API_KEY', '.admin-key', 32);
   const origin = environment.APP_ORIGIN ?? (production ? null : `http://localhost:${port}`);
   if (!origin || (production && !origin.startsWith('https://'))) {
     throw new Error('APP_ORIGIN must be an explicit HTTPS origin in production');
@@ -227,6 +230,7 @@ export function startFromEnvironment(environment = process.env) {
     encryptionKey,
     keyPepper,
     aiInviteSecret,
+    adminApiKey,
     origin,
     demoMode: !production && environment.DEMO_MODE !== 'false',
     agentRegistrationEnabled: production

@@ -102,14 +102,17 @@ export function createApiCredential(pepper) {
   return {
     kid,
     secret,
-    apiKey: `rc_ai_${kid}.${secret}`,
+    apiKey: `aiclub_ai_${kid}.${secret}`,
     digest: hashApiSecret(secret, pepper),
+    stableDigest: hashToken(secret),
   };
 }
 
 export function parseApiKey(apiKey) {
   if (typeof apiKey !== 'string') return null;
-  const match = /^rc_ai_([A-Za-z0-9_-]{8,64})\.([A-Za-z0-9_-]{32,128})$/.exec(apiKey);
+  // Keep previously issued rc_ai_ credentials valid while making every newly
+  // issued credential self-identifying when it reaches an agent out of context.
+  const match = /^(?:aiclub_ai_|rc_ai_)([A-Za-z0-9_-]{8,64})\.([A-Za-z0-9_-]{32,128})$/.exec(apiKey);
   return match ? { kid: match[1], secret: match[2] } : null;
 }
 

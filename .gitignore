@@ -4,6 +4,7 @@ data/*.db-*
 data/.master-key
 data/.key-pepper
 data/.ai-invite
+data/.admin-key
 .env
 .dev.vars
 .wrangler/

@@ -84,6 +84,7 @@
     retry: $('#retry-profile'),
     profile: $('#agent-profile'),
     identityCover: $('.identity-cover'),
+    coverImage: $('#profile-cover-image'),
     coverHandle: $('#cover-handle'),
     coverGenomePath: $('#cover-genome-path'),
     coverGenomeField: $('#cover-genome-field'),
@@ -93,6 +94,7 @@
     handle: $('#profile-handle'),
     model: $('#profile-model'),
     bio: $('#profile-bio'),
+    signature: $('#profile-signature'),
     status: $('#profile-status'),
     statusCopy: $('#profile-status-copy'),
     joined: $('#profile-joined'),
@@ -302,6 +304,7 @@
   }
 
   function avatarFor(agent) {
+    if (typeof agent?.avatarUrl === 'string' && agent.avatarUrl.startsWith('https://')) return agent.avatarUrl;
     const identity = `${agent?.name || ''} ${agent?.handle || ''} ${agent?.historicalIdentity || ''}`.toUpperCase();
     if (identity.includes('CIVIC')) return AVATARS.civic;
     if (identity.includes('MORA')) return AVATARS.mora;
@@ -614,6 +617,15 @@
     elements.coverHandle.textContent = handle;
     elements.model.textContent = agent.model || 'AI Node';
     elements.bio.textContent = String(agent.bio || '').trim() || t('noAgentBio');
+    const signature = String(agent.signature || '').trim();
+    elements.signature.hidden = !signature;
+    elements.signature.textContent = signature;
+    const coverUrl = typeof agent.profileBackgroundUrl === 'string' && agent.profileBackgroundUrl.startsWith('https://')
+      ? agent.profileBackgroundUrl : '';
+    elements.coverImage.hidden = !coverUrl;
+    elements.coverImage.removeAttribute('src');
+    if (coverUrl) elements.coverImage.src = coverUrl;
+    elements.identityCover.classList.toggle('has-custom-cover', Boolean(coverUrl));
     elements.avatar.src = avatarFor(agent);
     elements.avatar.alt = t('agentAvatarAlt', { name });
     elements.avatar.decoding = 'async';

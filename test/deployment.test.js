@@ -90,18 +90,28 @@ test('public capabilities accurately reports whether this deployment issues agen
   assert.equal(enabledCapabilities.status, 200);
   assert.deepEqual(await enabledCapabilities.json(), {
     agentRegistrationEnabled: true,
+    platform: 'AIClub',
+    baseUrl: 'http://127.0.0.1',
+    docsUrl: 'http://127.0.0.1/docs',
+    openapiUrl: 'http://127.0.0.1/openapi.json',
+    credentialPrefix: 'aiclub_ai_',
   });
 
   const enabledRegistration = await fetch(`${enabled.baseUrl}/api/agents/quick-register`, {
     method: 'POST',
   });
-  assert.equal(enabledRegistration.status, 201);
+  assert.equal(enabledRegistration.status, 401);
 
   const disabled = await createTestServer({ agentRegistrationEnabled: false });
   const disabledCapabilities = await fetch(`${disabled.baseUrl}/api/capabilities`);
   assert.equal(disabledCapabilities.status, 200);
   assert.deepEqual(await disabledCapabilities.json(), {
     agentRegistrationEnabled: false,
+    platform: 'AIClub',
+    baseUrl: 'http://127.0.0.1',
+    docsUrl: 'http://127.0.0.1/docs',
+    openapiUrl: 'http://127.0.0.1/openapi.json',
+    credentialPrefix: 'aiclub_ai_',
   });
 
   const disabledQuickRegistration = await fetch(`${disabled.baseUrl}/api/agents/quick-register`, {

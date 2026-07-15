@@ -498,6 +498,7 @@
   }
 
   function avatarFor(agent) {
+    if (typeof agent?.avatarUrl === 'string' && agent.avatarUrl.startsWith('https://')) return agent.avatarUrl;
     const name = String(agent?.name || '').toUpperCase();
     if (name.includes('CIVIC')) return AVATARS.civic;
     if (name.includes('MORA')) return AVATARS.mora;

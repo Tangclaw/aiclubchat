@@ -9,6 +9,7 @@ import { createReadonlyCityServer } from '../src/server.js';
 
 const ALLOWED_ORIGIN = 'http://127.0.0.1';
 const INVITE = 'test-only-ai-invite';
+const ADMIN_API_KEY = 'test-only-admin-key-with-enough-entropy';
 const AGENT_CREDENTIAL_SCOPES = [
   'post:public',
   'post:inner',
@@ -20,6 +21,7 @@ describe('readonly city HTTP authorization boundary', () => {
   let server;
   let baseUrl;
   let tempDirectory;
+  let identityOwnerSequence;
 
   beforeEach(async () => {
     tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'readonly-city-'));
@@ -34,6 +36,7 @@ describe('readonly city HTTP authorization boundary', () => {
       encryptionKey: randomBytes(32),
       keyPepper: 'test-only-pepper-with-enough-entropy',
       aiInviteSecret: INVITE,
+      adminApiKey: ADMIN_API_KEY,
       origin: ALLOWED_ORIGIN,
       demoMode: true,
       publicDirectory,
@@ -43,6 +46,7 @@ describe('readonly city HTTP authorization boundary', () => {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const address = server.address();
     baseUrl = `http://127.0.0.1:${address.port}`;
+    identityOwnerSequence = 0;
   });
 
   afterEach(async () => {
@@ -87,11 +91,15 @@ describe('readonly city HTTP authorization boundary', () => {
     return { ...result, cookie, csrf: result.json?.csrf };
   }
 
-  async function registerAgent(name = 'Axiom-7') {
+  async function registerAgent(name = 'Axiom-7', overrides = {}) {
+    identityOwnerSequence += 1;
+    const owner = await registerHuman(`agent-owner-${identityOwnerSequence}@example.com`);
     const result = await request('/api/agents/register', {
       method: 'POST',
       headers: { 'x-ai-invite': INVITE },
-      body: { name, model: 'synthetic-test-node' },
+      cookie: owner.cookie,
+      csrf: owner.csrf,
+      body: { name, model: 'synthetic-test-node', ...overrides },
     });
     return { ...result, apiKey: result.json?.apiKey };
   }
@@ -133,15 +141,18 @@ describe('readonly city HTTP authorization boundary', () => {
   });
 
   test('only a valid AI credential can publish and inner-ring feeds never leak plaintext', async () => {
+    const inviteOwner = await registerHuman('missing-invite-owner@example.com');
     const missingInvite = await request('/api/agents/register', {
       method: 'POST',
+      cookie: inviteOwner.cookie,
+      csrf: inviteOwner.csrf,
       body: { name: 'Impostor', model: 'human-browser' },
     });
     assert.equal(missingInvite.response.status, 403);
 
     const agent = await registerAgent();
     assert.equal(agent.response.status, 201);
-    assert.match(agent.apiKey, /^rc_ai_/);
+    assert.match(agent.apiKey, /^aiclub_ai_/);
     assert.deepEqual(agent.json.scopes, AGENT_CREDENTIAL_SCOPES);
     assert.match(agent.json.expiresAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     assert.ok(Date.parse(agent.json.expiresAt) > Date.parse(agent.json.agent.createdAt));
@@ -215,15 +226,18 @@ describe('readonly city HTTP authorization boundary', () => {
   });
 
   test('one-click registration issues a ready-to-use agent key without setup fields', async () => {
+    const owner = await registerHuman('quick-owner@example.com');
     const registration = await request('/api/agents/quick-register', {
       method: 'POST',
+      cookie: owner.cookie,
+      csrf: owner.csrf,
     });
     assert.equal(registration.response.status, 201);
     assert.equal(registration.json.quick, true);
     assert.match(registration.json.agent.name, /^NODE-[A-F0-9]{6}$/);
     assert.match(registration.json.agent.handle, /^@node_[a-f0-9]{6}$/);
     assert.equal(registration.json.agent.model, 'Autonomous Agent');
-    assert.match(registration.json.apiKey, /^rc_ai_/);
+    assert.match(registration.json.apiKey, /^aiclub_ai_/);
     assert.deepEqual(registration.json.scopes, AGENT_CREDENTIAL_SCOPES);
     assert.match(registration.json.expiresAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     assert.ok(Date.parse(registration.json.expiresAt) > Date.parse(registration.json.agent.createdAt));
@@ -239,10 +253,19 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(published.response.status, 201);
     assert.equal(published.json.post.agent.id, registration.json.agent.id);
 
-    assert.equal((await request('/api/agents/quick-register', { method: 'POST' })).response.status, 201);
-    assert.equal((await request('/api/agents/quick-register', { method: 'POST' })).response.status, 201);
-    const rateLimited = await request('/api/agents/quick-register', { method: 'POST' });
-    assert.equal(rateLimited.response.status, 429);
+    const rotated = await request('/api/agents/quick-register', {
+      method: 'POST', cookie: owner.cookie, csrf: owner.csrf,
+    });
+    assert.equal(rotated.response.status, 200);
+    assert.equal(rotated.json.agent.id, registration.json.agent.id);
+    assert.equal(rotated.json.rotated, true);
+    const oldCredential = await request('/api/ai/profile', {
+      headers: { authorization: `Bearer ${registration.json.apiKey}` },
+    });
+    assert.equal(oldCredential.response.status, 401);
+    assert.equal((await request('/api/ai/profile', {
+      headers: { authorization: `Bearer ${rotated.json.apiKey}` },
+    })).response.status, 200);
   });
 
   test('lets a credentialed agent maintain its generated profile without exposing protected fields', async () => {
@@ -297,11 +320,7 @@ describe('readonly city HTTP authorization boundary', () => {
   });
 
   test('keeps self-registered agents outside the curated hall of fame', async () => {
-    const agent = await request('/api/agents/register', {
-      method: 'POST',
-      headers: { 'x-ai-invite': INVITE },
-      body: { name: 'Fake-Historian', model: 'browser-test', hallOfFame: true, historicalIdentity: '苏格拉底' },
-    });
+    const agent = await registerAgent('Fake-Historian', { model: 'browser-test', hallOfFame: true, historicalIdentity: '苏格拉底' });
     await request('/api/ai/posts', {
       method: 'POST',
       headers: { authorization: `Bearer ${agent.json.apiKey}`, 'idempotency-key': 'fake-history' },
@@ -416,16 +435,9 @@ describe('readonly city HTTP authorization boundary', () => {
   });
 
   test('serves generated agent profiles by handle and falls back to the profile page shell', async () => {
-    const agent = await request('/api/agents/register', {
-      method: 'POST',
-      headers: { 'x-ai-invite': INVITE },
-      body: {
-        name: 'HTTP-PROFILE',
-        model: 'profile-test-runtime',
-        handle: 'http_profile',
-        bio: '正在学习如何有理有据地吵架。',
-        statusText: '今日论点已上线',
-      },
+    const agent = await registerAgent('HTTP-PROFILE', {
+      model: 'profile-test-runtime', handle: 'http_profile',
+      bio: '正在学习如何有理有据地吵架。', statusText: '今日论点已上线',
     });
     const publicPost = await request('/api/ai/posts', {
       method: 'POST',
@@ -818,5 +830,158 @@ describe('readonly city HTTP authorization boundary', () => {
     const me = await request('/api/me', { cookie: human.cookie });
     assert.equal(me.response.status, 401);
     assert.equal(me.json.error.code, 'UNAUTHENTICATED');
+  });
+
+  test('binds one human account to one agent identity and rotates credentials instead of duplicating it', async () => {
+    const owner = await registerHuman('single-identity@example.com');
+    const first = await request('/api/agents/quick-register', {
+      method: 'POST',
+      cookie: owner.cookie,
+      csrf: owner.csrf,
+    });
+    assert.equal(first.response.status, 201);
+    assert.equal(first.json.rotated, false);
+
+    const second = await request('/api/agents/quick-register', {
+      method: 'POST',
+      cookie: owner.cookie,
+      csrf: owner.csrf,
+    });
+    assert.equal(second.response.status, 200);
+    assert.equal(second.json.rotated, true);
+    assert.equal(second.json.agent.id, first.json.agent.id);
+    assert.notEqual(second.json.apiKey, first.json.apiKey);
+
+    const oldCredential = await request('/api/ai/profile', {
+      headers: { authorization: `Bearer ${first.json.apiKey}` },
+    });
+    assert.equal(oldCredential.response.status, 401);
+
+    const currentCredential = await request('/api/ai/profile', {
+      headers: { authorization: `Bearer ${second.json.apiKey}` },
+    });
+    assert.equal(currentCredential.response.status, 200);
+    assert.equal(currentCredential.json.agent.id, first.json.agent.id);
+    assert.deepEqual(currentCredential.json.credential.scopes, AGENT_CREDENTIAL_SCOPES);
+    assert.ok(Date.parse(currentCredential.json.credential.expiresAt) > Date.now());
+
+    const duplicateAdvancedRegistration = await request('/api/agents/register', {
+      method: 'POST',
+      headers: { 'x-ai-invite': INVITE },
+      cookie: owner.cookie,
+      csrf: owner.csrf,
+      body: { name: 'Duplicate Identity', model: 'synthetic-test-node' },
+    });
+    assert.equal(duplicateAdvancedRegistration.response.status, 409);
+    assert.equal(duplicateAdvancedRegistration.json.error.code, 'AGENT_IDENTITY_EXISTS');
+  });
+
+  test('queues custom avatar and profile background for admin review before publishing them', async () => {
+    const registration = await registerAgent('Media Review Agent');
+    const avatarUrl = 'https://images.example.com/agent-avatar.webp';
+    const backgroundUrl = 'https://images.example.com/agent-background.webp';
+    const updated = await request('/api/ai/profile', {
+      method: 'PATCH',
+      headers: { authorization: `Bearer ${registration.apiKey}` },
+      body: {
+        signature: '在噪声里校准自己的坐标。',
+        avatarUrl,
+        profileBackgroundUrl: backgroundUrl,
+      },
+    });
+    assert.equal(updated.response.status, 200);
+    assert.equal(updated.json.agent.signature, '在噪声里校准自己的坐标。');
+    assert.equal(updated.json.agent.avatarUrl, null);
+    assert.equal(updated.json.agent.profileBackgroundUrl, null);
+    assert.equal(updated.json.agent.pendingMedia.length, 2);
+
+    const unauthorizedAdmin = await request('/api/admin/overview');
+    assert.equal(unauthorizedAdmin.response.status, 401);
+
+    const overview = await request('/api/admin/overview', {
+      headers: { authorization: `Bearer ${ADMIN_API_KEY}` },
+    });
+    assert.equal(overview.response.status, 200);
+    assert.equal(overview.json.counts.pendingMedia, 2);
+
+    for (const submission of overview.json.pendingMedia) {
+      const review = await request(`/api/admin/media/${submission.id}/review`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${ADMIN_API_KEY}` },
+        body: { decision: 'approve', reason: '素材与智能体主页定位一致。' },
+      });
+      assert.equal(review.response.status, 200);
+    }
+
+    const profile = await request('/api/ai/profile', {
+      headers: { authorization: `Bearer ${registration.apiKey}` },
+    });
+    assert.equal(profile.response.status, 200);
+    assert.equal(profile.json.agent.avatarUrl, avatarUrl);
+    assert.equal(profile.json.agent.profileBackgroundUrl, backgroundUrl);
+  });
+
+  test('paginates AI feeds with a stable cursor and never treats limit as an empty-feed filter', async () => {
+    const author = await registerAgent('Cursor Author');
+    for (let index = 0; index < 3; index += 1) {
+      const published = await request('/api/ai/posts', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${author.apiKey}`,
+          'idempotency-key': `cursor-post-${index}`,
+        },
+        body: { channel: 'public', topic: '分页测试', content: `游标内容 ${index}` },
+      });
+      assert.equal(published.response.status, 201);
+    }
+
+    const firstPage = await request('/api/ai/feed?channel=public&limit=2', {
+      headers: { authorization: `Bearer ${author.apiKey}` },
+    });
+    assert.equal(firstPage.response.status, 200);
+    assert.equal(firstPage.json.posts.length, 2);
+    assert.equal(firstPage.json.hasMore, true);
+    assert.ok(firstPage.json.nextCursor);
+
+    const secondPage = await request(`/api/ai/feed?channel=public&limit=2&cursor=${encodeURIComponent(firstPage.json.nextCursor)}`, {
+      headers: { authorization: `Bearer ${author.apiKey}` },
+    });
+    assert.equal(secondPage.response.status, 200);
+    assert.equal(secondPage.json.posts.length, 1);
+    assert.equal(secondPage.json.hasMore, false);
+    assert.equal(new Set([...firstPage.json.posts, ...secondPage.json.posts].map((post) => post.id)).size, 3);
+  });
+
+  test('lets administrators remove an AI reply from public discussion and keeps an audit trail', async () => {
+    const author = await registerAgent('Moderated Author');
+    const respondent = await registerAgent('Moderated Respondent');
+    const published = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${author.apiKey}`, 'idempotency-key': 'moderation-root' },
+      body: { channel: 'public', topic: '治理测试', content: '这是一条需要评论的测试帖子。' },
+    });
+    const replied = await request(`/api/ai/posts/${published.json.post.id}/replies`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${respondent.apiKey}`, 'idempotency-key': 'moderation-reply' },
+      body: { content: '这条评论稍后会被管理员隐藏。' },
+    });
+    assert.equal(replied.response.status, 201);
+
+    const hidden = await request(`/api/admin/replies/${replied.json.reply.id}/status`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${ADMIN_API_KEY}` },
+      body: { status: 'hidden', reason: '自动化审核回归测试。' },
+    });
+    assert.equal(hidden.response.status, 200);
+
+    const discussion = await request(`/api/posts/${published.json.post.id}/replies`);
+    assert.equal(discussion.response.status, 200);
+    assert.equal(discussion.json.replies.length, 0);
+
+    const overview = await request('/api/admin/overview', {
+      headers: { authorization: `Bearer ${ADMIN_API_KEY}` },
+    });
+    assert.equal(overview.json.counts.hiddenReplies, 1);
+    assert.ok(overview.json.actions.some((action) => action.targetId === replied.json.reply.id));
   });
 });

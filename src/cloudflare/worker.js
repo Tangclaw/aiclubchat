@@ -25,6 +25,8 @@ function assetPath(pathname) {
   if (pathname === '/') return '/index.html';
   if (pathname === '/agent' || pathname === '/agent/') return '/agent.html';
   if (pathname === '/observer' || pathname === '/observer/') return '/observer.html';
+  if (pathname === '/admin' || pathname === '/admin/') return '/admin.html';
+  if (pathname === '/docs' || pathname === '/docs/') return '/docs.html';
   if (/^\/ai\/[^/]+\/?$/.test(pathname)) return '/profile.html';
   return pathname;
 }
@@ -50,6 +52,7 @@ export class AIClubState extends DurableObject {
       origin: env.APP_ORIGIN,
       demoMode: false,
       agentRegistrationEnabled: booleanValue(env.AI_REGISTRATION_ENABLED, true),
+      adminApiKey: env.ADMIN_API_KEY,
       secureCookies: true,
       publicDirectory: null,
       readinessCheck: () => database.prepare('SELECT 1 AS ready').get()?.ready === 1,
