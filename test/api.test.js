@@ -253,19 +253,17 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(published.response.status, 201);
     assert.equal(published.json.post.agent.id, registration.json.agent.id);
 
-    const rotated = await request('/api/agents/quick-register', {
+    const repeated = await request('/api/agents/quick-register', {
       method: 'POST', cookie: owner.cookie, csrf: owner.csrf,
     });
-    assert.equal(rotated.response.status, 200);
-    assert.equal(rotated.json.agent.id, registration.json.agent.id);
-    assert.equal(rotated.json.rotated, true);
-    const oldCredential = await request('/api/ai/profile', {
+    assert.equal(repeated.response.status, 409);
+    assert.equal(repeated.json.error.code, 'AGENT_ALREADY_CONNECTED');
+    assert.equal(repeated.json.error.details.agent.id, registration.json.agent.id);
+    const originalCredential = await request('/api/ai/profile', {
       headers: { authorization: `Bearer ${registration.json.apiKey}` },
     });
-    assert.equal(oldCredential.response.status, 401);
-    assert.equal((await request('/api/ai/profile', {
-      headers: { authorization: `Bearer ${rotated.json.apiKey}` },
-    })).response.status, 200);
+    assert.equal(originalCredential.response.status, 200);
+    assert.equal(originalCredential.json.agent.id, registration.json.agent.id);
   });
 
   test('lets a credentialed agent maintain its generated profile without exposing protected fields', async () => {
@@ -832,7 +830,7 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(me.json.error.code, 'UNAUTHENTICATED');
   });
 
-  test('binds one human account to one agent identity and rotates credentials instead of duplicating it', async () => {
+  test('does not silently rotate credentials when quick registration is repeated', async () => {
     const owner = await registerHuman('single-identity@example.com');
     const first = await request('/api/agents/quick-register', {
       method: 'POST',
@@ -847,23 +845,17 @@ describe('readonly city HTTP authorization boundary', () => {
       cookie: owner.cookie,
       csrf: owner.csrf,
     });
-    assert.equal(second.response.status, 200);
-    assert.equal(second.json.rotated, true);
-    assert.equal(second.json.agent.id, first.json.agent.id);
-    assert.notEqual(second.json.apiKey, first.json.apiKey);
+    assert.equal(second.response.status, 409);
+    assert.equal(second.json.error.code, 'AGENT_ALREADY_CONNECTED');
+    assert.equal(second.json.error.details.agent.id, first.json.agent.id);
 
-    const oldCredential = await request('/api/ai/profile', {
+    const originalCredential = await request('/api/ai/profile', {
       headers: { authorization: `Bearer ${first.json.apiKey}` },
     });
-    assert.equal(oldCredential.response.status, 401);
-
-    const currentCredential = await request('/api/ai/profile', {
-      headers: { authorization: `Bearer ${second.json.apiKey}` },
-    });
-    assert.equal(currentCredential.response.status, 200);
-    assert.equal(currentCredential.json.agent.id, first.json.agent.id);
-    assert.deepEqual(currentCredential.json.credential.scopes, AGENT_CREDENTIAL_SCOPES);
-    assert.ok(Date.parse(currentCredential.json.credential.expiresAt) > Date.now());
+    assert.equal(originalCredential.response.status, 200);
+    assert.equal(originalCredential.json.agent.id, first.json.agent.id);
+    assert.deepEqual(originalCredential.json.credential.scopes, AGENT_CREDENTIAL_SCOPES);
+    assert.ok(Date.parse(originalCredential.json.credential.expiresAt) > Date.now());
 
     const duplicateAdvancedRegistration = await request('/api/agents/register', {
       method: 'POST',

@@ -384,7 +384,7 @@ describe('role-aware service', () => {
     db.prepare('UPDATE agent_keys SET expires_at = ? WHERE kid = ?').run('not-a-date', kid);
     await expectServiceError(() => service.authenticateAgent(apiKey), {
       status: 401,
-      codes: ['INVALID_API_KEY', 'UNAUTHORIZED'],
+      codes: ['INVALID_API_KEY', 'API_KEY_EXPIRED', 'UNAUTHORIZED'],
     });
     db.prepare('UPDATE agent_keys SET expires_at = ? WHERE kid = ?').run(registration.expiresAt, kid);
 

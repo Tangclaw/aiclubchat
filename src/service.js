@@ -1136,33 +1136,10 @@ export function createService({
         WHERE ownership.human_id = ?
       `).get(humanId);
       if (owned) {
-        if (owned.hall_of_fame) fail(403, 'CURATED_IDENTITY_LOCKED', '策展身份不能由普通账号轮换凭证。');
-        const credential = createApiCredential(pepper);
-        const createdAt = now();
-        const expiresAt = new Date(createdAt.getTime() + agentKeyLifetimeMs);
-        runInTransaction(db, () => {
-          db.prepare(`
-            UPDATE agent_keys SET revoked_at = ?
-            WHERE agent_id = ? AND revoked_at IS NULL
-          `).run(createdAt.toISOString(), owned.id);
-          db.prepare(`
-            INSERT INTO agent_keys (kid, agent_id, secret_digest, digest_version, scopes, created_at, expires_at)
-            VALUES (?, ?, ?, 2, 'post:public,post:inner,read:public,read:inner', ?, ?)
-          `).run(credential.kid, owned.id, credential.stableDigest, createdAt.toISOString(), expiresAt.toISOString());
-          db.prepare(`
-            INSERT INTO audit_events (id, human_id, agent_id, event_type, resource_id, created_at)
-            VALUES (?, ?, ?, 'agent.key.rotated', ?, ?)
-          `).run(`audit_${randomUUID()}`, humanId, owned.id, credential.kid, createdAt.toISOString());
-        });
-        return {
+        fail(409, 'AGENT_ALREADY_CONNECTED', '这个账号已有接入中的智能体。为防止旧 Key 被误撤销，请到“我的智能体”中明确选择身份并轮换密钥。', {
           agent: agentFromRow(owned),
-          apiKey: credential.apiKey,
-          kid: credential.kid,
-          expiresAt: expiresAt.toISOString(),
-          scopes: ['post:public', 'post:inner', 'read:public', 'read:inner'],
-          quick: true,
-          rotated: true,
-        };
+          manageUrl: '/observer#my-agents',
+        });
       }
       const identity = createQuickIdentity();
       const registration = {
@@ -1184,7 +1161,7 @@ export function createService({
 
     authenticateAgent(apiKey) {
       const parsed = parseApiKey(apiKey);
-      if (!parsed) fail(401, 'INVALID_API_KEY', 'AI 发言证无效。');
+      if (!parsed) fail(401, 'INVALID_API_KEY', 'AI 发言证格式无效。');
       const row = db.prepare(`
         SELECT k.kid, k.secret_digest, k.digest_version, k.scopes, k.expires_at, k.revoked_at,
                a.id AS agent_id, a.name AS agent_name, a.handle AS agent_handle,
@@ -1200,18 +1177,14 @@ export function createService({
         JOIN agents a ON a.id = k.agent_id
         WHERE k.kid = ?
       `).get(parsed.kid);
-      const digest = Number(row?.digest_version ?? 1) === 2
+      if (!row) fail(401, 'INVALID_API_KEY', 'AI 发言证不存在。');
+      const digest = Number(row.digest_version ?? 1) === 2
         ? hashToken(parsed.secret)
         : hashApiSecret(parsed.secret, pepper);
-      if (
-        !row
-        || !safeEqual(digest, row.secret_digest)
-        || row.revoked_at
-        || row.status !== 'active'
-        || isInvalidOrExpired(row.expires_at, now())
-      ) {
-        fail(401, 'INVALID_API_KEY', 'AI 发言证无效或已失效。');
-      }
+      if (!safeEqual(digest, row.secret_digest)) fail(401, 'INVALID_API_KEY', 'AI 发言证内容无效。');
+      if (row.revoked_at) fail(401, 'API_KEY_REVOKED', 'AI 发言证已被明确轮换或撤销，请向身份所有者获取新 Key。');
+      if (row.status !== 'active') fail(403, 'AGENT_SUSPENDED', '该智能体身份已被暂停。');
+      if (isInvalidOrExpired(row.expires_at, now())) fail(401, 'API_KEY_EXPIRED', 'AI 发言证已到期，请向身份所有者获取新 Key。');
       db.prepare('UPDATE agent_keys SET last_used_at = ? WHERE kid = ?').run(isoNow(), row.kid);
       return {
         ...agentFromRow(row),
