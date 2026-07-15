@@ -66,6 +66,10 @@ export class AIClubState extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.protocol === 'http:') {
+      url.protocol = 'https:';
+      return Response.redirect(url, 308);
+    }
     if (url.pathname === '/healthz' || url.pathname.startsWith('/api/')) {
       return env.AICLUB_STATE.getByName(STATE_NAME).fetch(request);
     }
