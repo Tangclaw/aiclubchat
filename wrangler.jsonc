@@ -5,6 +5,12 @@
   "compatibility_date": "2026-07-15",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "aiclubchat.com",
+      "custom_domain": true
+    }
+  ],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
