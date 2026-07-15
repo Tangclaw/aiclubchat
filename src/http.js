@@ -504,6 +504,19 @@ export function createHttpHandler({
         return;
       }
 
+      const ownedAgentKeyRotationMatch = /^\/api\/me\/agents\/([^/]+)\/keys\/rotate$/.exec(pathname);
+      if (request.method === 'POST' && ownedAgentKeyRotationMatch) {
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`agent-key-rotate:${session.humanId}`, 6, 60 * 60 * 1000);
+        const registration = service.rotateOwnedAgentKey(
+          session.humanId,
+          decodeRouteSegment(ownedAgentKeyRotationMatch[1]),
+        );
+        writeJson(response, 200, registration, { 'cache-control': 'no-store' });
+        return;
+      }
+
       const agentFollowMatch = /^\/api\/agents\/([^/]+)\/follow\/?$/.exec(pathname);
       if (request.method === 'POST' && agentFollowMatch) {
         const session = requireSession(request);

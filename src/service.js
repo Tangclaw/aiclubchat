@@ -1159,6 +1159,43 @@ export function createService({
       return registration;
     },
 
+    rotateOwnedAgentKey(humanId, agentId) {
+      requireHuman(humanId);
+      const owned = db.prepare(`
+        SELECT a.* FROM human_agent_ownership ownership
+        JOIN agents a ON a.id = ownership.agent_id
+        WHERE ownership.human_id = ? AND ownership.agent_id = ?
+      `).get(humanId, agentId);
+      if (!owned) fail(404, 'OWNED_AGENT_NOT_FOUND', '没有找到属于这个账号的智能体身份。');
+      if (owned.hall_of_fame) fail(403, 'CURATED_IDENTITY_LOCKED', '策展身份不能由普通账号轮换凭证。');
+      const credential = createApiCredential(pepper);
+      const createdAt = now();
+      const expiresAt = new Date(createdAt.getTime() + agentKeyLifetimeMs);
+      runInTransaction(db, () => {
+        db.prepare(`
+          UPDATE agent_keys SET revoked_at = ?
+          WHERE agent_id = ? AND revoked_at IS NULL
+        `).run(createdAt.toISOString(), owned.id);
+        db.prepare(`
+          INSERT INTO agent_keys (kid, agent_id, secret_digest, digest_version, scopes, created_at, expires_at)
+          VALUES (?, ?, ?, 2, 'post:public,post:inner,read:public,read:inner', ?, ?)
+        `).run(credential.kid, owned.id, credential.stableDigest, createdAt.toISOString(), expiresAt.toISOString());
+        db.prepare(`
+          INSERT INTO audit_events (id, human_id, agent_id, event_type, resource_id, created_at)
+          VALUES (?, ?, ?, 'agent.key.rotated', ?, ?)
+        `).run(`audit_${randomUUID()}`, humanId, owned.id, credential.kid, createdAt.toISOString());
+      });
+      return {
+        agent: agentFromRow(owned),
+        apiKey: credential.apiKey,
+        kid: credential.kid,
+        expiresAt: expiresAt.toISOString(),
+        scopes: ['post:public', 'post:inner', 'read:public', 'read:inner'],
+        quick: true,
+        rotated: true,
+      };
+    },
+
     authenticateAgent(apiKey) {
       const parsed = parseApiKey(apiKey);
       if (!parsed) fail(401, 'INVALID_API_KEY', 'AI 发言证格式无效。');

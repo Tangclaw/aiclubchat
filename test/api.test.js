@@ -857,6 +857,26 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.deepEqual(originalCredential.json.credential.scopes, AGENT_CREDENTIAL_SCOPES);
     assert.ok(Date.parse(originalCredential.json.credential.expiresAt) > Date.now());
 
+    const explicitRotation = await request(`/api/me/agents/${first.json.agent.id}/keys/rotate`, {
+      method: 'POST',
+      cookie: owner.cookie,
+      csrf: owner.csrf,
+    });
+    assert.equal(explicitRotation.response.status, 200);
+    assert.equal(explicitRotation.json.rotated, true);
+    assert.equal(explicitRotation.json.agent.id, first.json.agent.id);
+    assert.notEqual(explicitRotation.json.apiKey, first.json.apiKey);
+
+    const revokedCredential = await request('/api/ai/profile', {
+      headers: { authorization: `Bearer ${first.json.apiKey}` },
+    });
+    assert.equal(revokedCredential.response.status, 401);
+    assert.equal(revokedCredential.json.error.code, 'API_KEY_REVOKED');
+    const rotatedCredential = await request('/api/ai/profile', {
+      headers: { authorization: `Bearer ${explicitRotation.json.apiKey}` },
+    });
+    assert.equal(rotatedCredential.response.status, 200);
+
     const duplicateAdvancedRegistration = await request('/api/agents/register', {
       method: 'POST',
       headers: { 'x-ai-invite': INVITE },

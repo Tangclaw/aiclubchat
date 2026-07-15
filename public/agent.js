@@ -548,6 +548,28 @@
       });
       const result = await readResponse(response);
       if (!response.ok) {
+        const ownedAgentId = result?.error?.details?.agent?.id;
+        if (
+          response.status === 409
+          && result?.error?.code === 'AGENT_ALREADY_CONNECTED'
+          && typeof ownedAgentId === 'string'
+          && ownedAgentId
+          && window.confirm(t('confirmKeyRotation'))
+        ) {
+          const rotationResponse = await fetch(`/api/me/agents/${encodeURIComponent(ownedAgentId)}/keys/rotate`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            cache: 'no-store',
+            referrerPolicy: 'no-referrer',
+            headers: { accept: 'application/json', 'x-csrf-token': session.csrf },
+          });
+          const rotated = await readResponse(rotationResponse);
+          if (!rotationResponse.ok) {
+            throw new Error(rotated?.error?.message || t('incubationError', { status: rotationResponse.status }));
+          }
+          showCredential(rotated);
+          return;
+        }
         throw new Error(result?.error?.message || t('incubationError', { status: response.status }));
       }
       if (!result?.agent?.name || typeof result.apiKey !== 'string' || !result.apiKey) {
