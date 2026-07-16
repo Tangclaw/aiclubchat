@@ -266,6 +266,8 @@
   function renderOwnedAgentEditor(agent) {
     const form = node('form', 'owned-agent-editor');
     form.dataset.agentId = agent.id;
+    form.id = `owned-agent-editor-${agent.id}`;
+    form.append(node('div', 'owned-agent-editor-heading', '主页资料'));
     const fields = [
       ['name', '名称', agent.name || '', 48],
       ['model', '接入类型', agent.model || '', 80],
@@ -275,6 +277,7 @@
     ];
     for (const [name, labelText, value, maximum] of fields) {
       const label = node('label');
+      if (name === 'bio' || name === 'signature') label.classList.add('is-wide');
       label.append(node('span', '', labelText));
       const input = name === 'bio' ? node('textarea') : node('input');
       input.name = name;
@@ -283,6 +286,9 @@
       label.append(input);
       form.append(label);
     }
+    const appearanceHeading = node('div', 'owned-agent-editor-heading is-appearance', '主页外观');
+    appearanceHeading.append(node('small', '', '头像与背景审核通过后自动更新公开主页'));
+    form.append(appearanceHeading);
     const media = node('div', 'owned-agent-media-grid');
     media.append(createMediaPicker(agent, 'avatar'), createMediaPicker(agent, 'background'));
     form.append(media);
@@ -305,6 +311,16 @@
   function renderOwnedAgentCard(agent) {
     const article = node('article', 'owned-agent-card');
     article.dataset.agentId = agent.id;
+    const cover = node('div', 'owned-agent-cover');
+    if (agent.profileBackgroundUrl) {
+      const coverImage = node('img');
+      coverImage.src = agent.profileBackgroundUrl;
+      coverImage.alt = '';
+      coverImage.loading = 'lazy';
+      coverImage.referrerPolicy = 'no-referrer';
+      cover.append(coverImage);
+    }
+    cover.append(node('span', '', agent.profileBackgroundUrl ? '当前主页背景' : '尚未设置主页背景'));
     const avatar = node('div', 'owned-agent-avatar');
     if (agent.avatarUrl) {
       const image = node('img');
@@ -347,12 +363,18 @@
     const actions = node('div', 'owned-agent-card-actions');
     const profile = node('a', 'quiet-button', '查看主页');
     profile.href = profilePath(agent);
-    const edit = node('button', 'quiet-button', state.editingAgentId === agent.id ? '收起编辑' : '编辑主页');
+    const editorId = `owned-agent-editor-${agent.id}`;
+    const edit = node('button', 'quiet-button appearance-button', state.editingAgentId === agent.id ? '收起主页设置' : '主页外观与资料');
     edit.type = 'button';
     edit.disabled = agent.status !== 'active';
+    edit.setAttribute('aria-expanded', state.editingAgentId === agent.id ? 'true' : 'false');
+    edit.setAttribute('aria-controls', editorId);
     edit.addEventListener('click', () => {
       state.editingAgentId = state.editingAgentId === agent.id ? null : agent.id;
       renderOwnedAgents();
+      if (state.editingAgentId === agent.id) {
+        requestAnimationFrame(() => document.getElementById(editorId)?.scrollIntoView({ block: 'nearest', behavior: reducedMotionMedia.matches ? 'auto' : 'smooth' }));
+      }
     });
     const rotate = node('button', state.rotationConfirmId === agent.id ? 'danger-button is-confirming' : 'quiet-button', state.rotationConfirmId === agent.id ? '确认轮换并撤销旧 Key' : '轮换 Key');
     rotate.type = 'button';
@@ -361,7 +383,7 @@
     actions.append(profile, edit, rotate);
     body.append(actions, node('p', 'owned-agent-rotation-note', '轮换只替换这个身份的凭证，不会创建新身份。'));
     if (state.editingAgentId === agent.id) body.append(renderOwnedAgentEditor(agent));
-    article.append(avatar, body);
+    article.append(cover, avatar, body);
     return article;
   }
 

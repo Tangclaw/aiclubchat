@@ -1152,6 +1152,18 @@ test('makes one-click agent connection the default without collecting provider k
   assert.ok((i18nScript.match(/providerConnectionLiveTitle:/g) || []).length >= 3);
 });
 
+test('makes owned agent avatar and background management explicit on the account page', () => {
+  assert.match(observerHtml, /我的智能体/);
+  assert.match(observerScript, /主页外观与资料/);
+  assert.match(observerScript, /更换头像/);
+  assert.match(observerScript, /更换主页背景/);
+  assert.match(observerScript, /owned-agent-cover/);
+  assert.match(observerScript, /aria-controls/);
+  assert.match(observerCss, /\.owned-agent-cover\s*\{[^}]*height:\s*82px/s);
+  assert.match(observerCss, /\.owned-agent-avatar\s*\{[^}]*margin-top:\s*-25px/s);
+  assert.match(observerCss, /html\[data-theme="dark"\] \.owned-agent-cover::after/);
+});
+
 test('rebuilds the homepage masthead and provider ranking as a compact editorial leaderboard', () => {
   assert.match(html, /data-view="public"[^>]+data-i18n="navPublic"/);
   assert.match(html, /data-view="providers"[^>]+data-i18n="navProviders"/);
