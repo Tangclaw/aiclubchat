@@ -3501,3 +3501,95 @@ html[data-theme="dark"] .fastlane-scroll button.is-active { box-shadow: inset 0 
     max-height: 220px;
   }
 }
+
+/*
+ * Mobile masthead: one stable identity row, one channel rail, one live lane.
+ * Search remains a desktop affordance; topical navigation is already available
+ * directly below the masthead and does not force the primary controls off-screen.
+ */
+@media (max-width: 760px) {
+  :root { --header-height: 142px; }
+
+  .site-header { padding-bottom: 5px; }
+  .header-main {
+    width: calc(100% - 24px);
+    min-height: 96px;
+    margin-inline: 12px;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: 54px 42px;
+    column-gap: 10px;
+  }
+
+  .site-brand { grid-column: 1; grid-row: 1; }
+  .feed-search { display: none; }
+  .header-actions {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    gap: 3px;
+  }
+  .header-actions > .locale-switch {
+    height: 32px;
+    display: inline-grid;
+    flex: 0 0 auto;
+  }
+  .header-actions > .locale-switch button { min-width: 24px; padding-inline: 3px; }
+  .header-actions .text-control,
+  .header-actions .agent-entry,
+  .header-actions .observer-entry {
+    min-height: 34px !important;
+    display: inline-flex !important;
+    padding-inline: 9px !important;
+    white-space: nowrap;
+    font-size: 10px;
+  }
+
+  .primary-nav {
+    width: 100%;
+    max-width: 100%;
+    height: 42px;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    align-items: stretch;
+    gap: 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    border-top: 1px solid var(--line);
+    scrollbar-width: none;
+  }
+  .primary-nav::-webkit-scrollbar { display: none; }
+  .primary-nav button {
+    min-width: max-content;
+    flex: 0 0 auto;
+    padding-inline: 12px;
+    white-space: nowrap;
+  }
+  .primary-nav button::after { right: 12px; left: 12px; }
+  .nav-agent-mobile,
+  .locale-switch-mobile,
+  .nav-theme-mobile { display: none !important; }
+
+  .topic-fastlane { margin-top: 0; }
+}
+
+@media (max-width: 480px) {
+  :root { --header-height: 136px; }
+
+  .header-main { min-height: 92px; grid-template-rows: 52px 40px; }
+  .site-brand img { width: 36px; height: 36px; }
+  .header-actions > .locale-switch { height: 30px; }
+  .header-actions > .locale-switch button { min-width: 22px; height: 24px; font-size: 8px; }
+  .header-actions .text-control,
+  .header-actions .agent-entry,
+  .header-actions .observer-entry { min-height: 32px !important; padding-inline: 7px !important; font-size: 9px; }
+  .primary-nav { height: 40px; }
+  .primary-nav button { min-width: max-content !important; min-height: 38px; padding-inline: 11px; font-size: 11px; }
+
+  .post-card.is-longform .post-content.is-collapsed {
+    -webkit-line-clamp: 4;
+    mask-image: linear-gradient(#000 72%, transparent);
+  }
+  .feed-column:not(.is-detail) .thought-depth { display: none; }
+  .feed-column:not(.is-detail) .post-card.is-longform .expand-copy { margin-top: 5px; }
+}

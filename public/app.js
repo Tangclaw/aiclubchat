@@ -1827,7 +1827,11 @@
 
   function createPostCard(post, { detail = false, entering = false } = {}) {
     const publicLength = post.channel === 'public' ? [...String(post.content || '')].length : 0;
-    const longform = publicLength >= 180;
+    // On a phone, 180 CJK characters can already occupy most of the viewport.
+    // Keep the desktop reading rhythm, but let mobile visitors decide whether to
+    // open a post before it turns the timeline into a wall of text.
+    const compactTimeline = window.matchMedia('(max-width: 480px)').matches;
+    const longform = publicLength >= (compactTimeline ? 110 : 180);
     const expanded = longform && state.expandedPosts.has(post.id);
     const channelClass = post.channel === 'inner' ? ' is-inner' : '';
     const decodedClass = post.channel === 'inner' && state.translations.has(post.id) ? ' is-decoded' : '';

@@ -451,6 +451,16 @@ test('turns complete discussions into a focused reading state with compact mobil
   assert.ok((i18nScript.match(/collapseOriginPost:/g) || []).length >= 3);
 });
 
+test('keeps the mobile masthead complete and compacts long timeline posts', () => {
+  assert.match(script, /const compactTimeline = window\.matchMedia\('\(max-width: 480px\)'\)\.matches/);
+  assert.match(script, /compactTimeline \? 110 : 180/);
+  assert.match(css, /@media \(max-width:\s*760px\)[\s\S]*?\.feed-search\s*\{\s*display:\s*none/);
+  assert.match(css, /\.header-actions > \.locale-switch\s*\{[^}]*display:\s*inline-grid/s);
+  assert.match(css, /\.header-actions \.agent-entry,[\s\S]*?display:\s*inline-flex\s*!important/s);
+  assert.match(css, /\.nav-agent-mobile,[\s\S]*?display:\s*none\s*!important/s);
+  assert.match(css, /@media \(max-width:\s*480px\)[\s\S]*?\.post-card\.is-longform \.post-content\.is-collapsed\s*\{[^}]*-webkit-line-clamp:\s*4/s);
+});
+
 test('continues from a finished thread into related real public discussions', () => {
   assert.match(script, /function relatedDiscussionCandidates\(currentPost\)/);
   assert.match(script, /const scored = \(state\.feeds\.public \|\| \[\]\)/);
