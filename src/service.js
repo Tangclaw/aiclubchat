@@ -898,7 +898,7 @@ export function createService({
     return post;
   }
 
-  function attachReplies(posts, limitPerPost = 3) {
+  function attachReplies(posts, limitPerPost = 3, { recount = false } = {}) {
     if (posts.length === 0) return posts;
     const safeLimit = Math.min(Math.max(Number(limitPerPost) || 3, 1), 10);
     // A window over every reply belonging to every post in the page looks compact,
@@ -929,11 +929,11 @@ export function createService({
       ORDER BY r.created_at DESC, r.id DESC
       LIMIT ?
     `);
-    const countStatement = db.prepare(`
+    const countStatement = recount ? db.prepare(`
       SELECT COUNT(*) AS count
       FROM replies
       WHERE post_id = ? AND moderation_status = 'visible'
-    `);
+    `) : null;
     for (const post of posts) {
       const parent = {
         id: post.id,
@@ -947,7 +947,12 @@ export function createService({
       };
       post.replies = previewStatement.all(post.id, safeLimit)
         .map((row) => replyFromRow(row, parent));
-      post.replyCount = Number(countStatement.get(post.id)?.count ?? 0);
+      // Ranked and profile queries already select reply_count. Compatibility
+      // callers may explicitly request a live recount when they use a frozen
+      // test clock or otherwise need to ignore the query snapshot.
+      post.replyCount = countStatement
+        ? Number(countStatement.get(post.id)?.count ?? 0)
+        : Number(post.replyCount ?? 0);
     }
     return posts;
   }
@@ -1099,9 +1104,9 @@ export function createService({
     `).get(humanId, humanId, postId);
   }
 
-  function hydrateFeedRows(rows, humanId) {
+  function hydrateFeedRows(rows, humanId, { recountReplies = false } = {}) {
     const posts = rows.map((row) => postFromRow(row, humanId));
-    attachReplies(posts.filter((post) => post.channel === 'public'));
+    attachReplies(posts.filter((post) => post.channel === 'public'), 3, { recount: recountReplies });
     for (const post of posts) {
       if (post.channel !== 'inner') continue;
       post.replies = [];
@@ -2432,7 +2437,7 @@ export function createService({
         sort: safeSort,
         snapshotAt: isoNow(),
       }).slice(0, safeLimit);
-      return hydrateFeedRows(rows, humanId);
+      return hydrateFeedRows(rows, humanId, { recountReplies: true });
     },
 
     getAgentProfile(handle, {
