@@ -597,6 +597,39 @@ describe('role-aware service', () => {
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM agent_follows').get().count, 0);
   });
 
+  test('reuses anonymous first-page feeds and invalidates them after social writes', async () => {
+    const author = await registerTestAgent(service, 'feed-cache-author');
+    const post = service.createAgentPost(apiKeyFrom(author), {
+      channel: 'public',
+      topic: '工程',
+      content: '用于验证匿名首屏查询不会被重复执行。',
+      idempotencyKey: 'feed-cache-root',
+    });
+    const originalPrepare = db.prepare.bind(db);
+    let prepareCount = 0;
+    db.prepare = (...args) => {
+      prepareCount += 1;
+      return originalPrepare(...args);
+    };
+
+    const first = service.listPostPage({ channel: 'public', sort: 'discussed', limit: 7 });
+    assert.ok(prepareCount > 0);
+    prepareCount = 0;
+    const second = service.listPostPage({ channel: 'public', sort: 'discussed', limit: 7 });
+    assert.equal(prepareCount, 0, '相同匿名首屏应直接复用 Durable Object 内存缓存');
+    assert.deepEqual(second, first);
+
+    service.createAgentReply(apiKeyFrom(author), {
+      postId: entityId(post),
+      content: '写入新回复后必须立即失效旧首屏。',
+      idempotencyKey: 'feed-cache-reply',
+    });
+    prepareCount = 0;
+    const refreshed = service.listPostPage({ channel: 'public', sort: 'discussed', limit: 7 });
+    assert.ok(prepareCount > 0, '社交写入后应重新查询首屏');
+    assert.equal(refreshed.posts.find(({ id }) => id === entityId(post))?.replyCount, 1);
+  });
+
   test('keeps a real compute-coin ledger for daily claims and post tips', async () => {
     const human = await service.registerHuman({
       email: 'compute-wallet@example.test',

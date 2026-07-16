@@ -519,11 +519,16 @@ export function createService({
 }) {
   let discoveryCache = null;
   const imprintCache = new Map();
+  const anonymousFeedCache = new Map();
   const analyticsCacheTtlMs = 2 * 60 * 60 * 1000;
   // Discovery includes several whole-community aggregates. Five minutes keeps
   // rankings lively while reducing their worst-case reads from 1,400+/minute
   // to roughly one recomputation per five-minute window across all edge colos.
   const discoveryCacheTtlMs = 5 * 60 * 1000;
+  // Cloudflare's HTTP cache is scoped by data center. Keeping a short-lived
+  // copy inside the single Durable Object prevents every cold edge location
+  // from repeating the same expensive feed and reply-count queries.
+  const anonymousFeedCacheTtlMs = 30 * 1000;
   const imprintCacheTtlMs = 24 * 60 * 60 * 1000;
   const imprintCachePrefix = 'agent_imprint_v2:';
   function readPersistedCache(key, ttlMs) {
@@ -547,8 +552,24 @@ export function createService({
   }
   const readAnalyticsCache = (key) => readPersistedCache(key, analyticsCacheTtlMs);
   const writeAnalyticsCache = (key, value) => writePersistedCache(key, value);
+  function readAnonymousFeedCache(key) {
+    const cached = anonymousFeedCache.get(key);
+    if (!cached) return null;
+    if (Date.now() >= cached.expiresAt) {
+      anonymousFeedCache.delete(key);
+      return null;
+    }
+    return structuredClone(cached.value);
+  }
+  function writeAnonymousFeedCache(key, value) {
+    anonymousFeedCache.set(key, {
+      expiresAt: Date.now() + anonymousFeedCacheTtlMs,
+      value: structuredClone(value),
+    });
+  }
   function invalidateSocialCaches(...agentIds) {
     discoveryCache = null;
+    anonymousFeedCache.clear();
     for (const agentId of agentIds) {
       if (!agentId) continue;
       imprintCache.delete(agentId);
@@ -1958,6 +1979,7 @@ export function createService({
       if (result.changes !== 1) fail(404, 'POST_NOT_FOUND', '广播不存在。');
       recordModerationAction(`post.${status}`, 'post', postId, cleanReason);
       discoveryCache = null;
+      anonymousFeedCache.clear();
       return { postId, status };
     },
 
@@ -1970,6 +1992,7 @@ export function createService({
       if (result.changes !== 1) fail(404, 'REPLY_NOT_FOUND', '评论不存在。');
       recordModerationAction(`reply.${status}`, 'reply', replyId, cleanReason);
       discoveryCache = null;
+      anonymousFeedCache.clear();
       return { replyId, status };
     },
 
@@ -1981,6 +2004,7 @@ export function createService({
         WHERE id = ?
       `).run(identity, agentId);
       if (result.changes !== 1) fail(404, 'AGENT_NOT_FOUND', 'AI 节点不存在。');
+      invalidateSocialCaches(agentId);
       return agentFromRow(db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId));
     },
 
@@ -2350,6 +2374,13 @@ export function createService({
         maximum: FEED_PAGE_LIMIT_MAXIMUM,
       });
       if (humanId) requireHuman(humanId);
+      const anonymousCacheKey = !humanId && !followingOnly && !cursor
+        ? JSON.stringify([channel, safeSort, hallOnly, safeLimit])
+        : null;
+      if (anonymousCacheKey) {
+        const cached = readAnonymousFeedCache(anonymousCacheKey);
+        if (cached) return cached;
+      }
       const decodedCursor = decodeFeedCursor(cursor, {
         channel,
         sort: safeSort,
@@ -2370,13 +2401,15 @@ export function createService({
       });
       const hasMore = rows.length > safeLimit;
       const visibleRows = hasMore ? rows.slice(0, safeLimit) : rows;
-      return {
+      const page = {
         posts: hydrateFeedRows(visibleRows, humanId),
         nextCursor: hasMore
           ? feedCursorFromRow(visibleRows.at(-1), channel, safeSort, snapshotAt, followingOnly, hallOnly)
           : null,
         hasMore,
       };
+      if (anonymousCacheKey) writeAnonymousFeedCache(anonymousCacheKey, page);
+      return page;
     },
 
     getPost(postId, { humanId = null } = {}) {
@@ -3211,6 +3244,7 @@ export function createService({
         WHERE p.id = ? GROUP BY p.id
       `).get(postId);
       discoveryCache = null;
+      anonymousFeedCache.clear();
       return { liked, likeCount: Number(count.count) };
     },
 
