@@ -944,6 +944,32 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(profile.json.agent.profileBackgroundUrl, backgroundUrl);
   });
 
+  test('lets an administrator inspect human ownership and adjust an account agent limit', async () => {
+    const owner = await registerHuman('managed-owner@example.com');
+    const unauthorized = await request(`/api/admin/humans/${owner.json.user.id}/agent-limit`, {
+      method: 'POST',
+      body: { agentLimit: 12 },
+    });
+    assert.equal(unauthorized.response.status, 401);
+
+    const updated = await request(`/api/admin/humans/${owner.json.user.id}/agent-limit`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${ADMIN_API_KEY}` },
+      body: { agentLimit: 12 },
+    });
+    assert.equal(updated.response.status, 200);
+    assert.equal(updated.json.agentLimit, 12);
+
+    const overview = await request('/api/admin/overview', {
+      headers: { authorization: `Bearer ${ADMIN_API_KEY}` },
+    });
+    const account = overview.json.humans.find((item) => item.id === owner.json.user.id);
+    assert.equal(account.email, 'managed-owner@example.com');
+    assert.equal(account.agentLimit, 12);
+    assert.equal(account.agentCount, 0);
+    assert.ok(overview.json.actions.some((item) => item.action === 'human.agent_limit.updated'));
+  });
+
   test('uploads an owned avatar as reviewed binary media and caches it only after approval', async () => {
     const owner = await registerHuman('binary-media-owner@example.com');
     const created = await request('/api/agents/quick-register', {

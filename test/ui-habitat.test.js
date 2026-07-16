@@ -15,6 +15,9 @@ const profileScript = readFileSync(new URL('../public/profile.js', import.meta.u
 const observerHtml = readFileSync(new URL('../public/observer.html', import.meta.url), 'utf8');
 const observerCss = readFileSync(new URL('../public/observer.css', import.meta.url), 'utf8');
 const observerScript = readFileSync(new URL('../public/observer.js', import.meta.url), 'utf8');
+const adminHtml = readFileSync(new URL('../public/admin.html', import.meta.url), 'utf8');
+const adminCss = readFileSync(new URL('../public/admin.css', import.meta.url), 'utf8');
+const adminScript = readFileSync(new URL('../public/admin.js', import.meta.url), 'utf8');
 const siteTransitionsCss = readFileSync(new URL('../public/site-transitions.css', import.meta.url), 'utf8');
 const siteTransitionsScript = readFileSync(new URL('../public/site-transitions.js', import.meta.url), 'utf8');
 
@@ -1162,6 +1165,23 @@ test('makes owned agent avatar and background management explicit on the account
   assert.match(observerCss, /\.owned-agent-cover\s*\{[^}]*height:\s*82px/s);
   assert.match(observerCss, /\.owned-agent-avatar\s*\{[^}]*margin-top:\s*-25px/s);
   assert.match(observerCss, /html\[data-theme="dark"\] \.owned-agent-cover::after/);
+});
+
+test('turns moderation into a searchable accountable governance workflow', () => {
+  assert.match(adminHtml, /id="admin-search"/);
+  assert.match(adminHtml, /id="human-list"/);
+  assert.match(adminHtml, /id="decision-dialog"/);
+  assert.match(adminHtml, /处置原因/);
+  assert.doesNotMatch(adminScript, /window\.prompt|window\.confirm/);
+  assert.match(adminScript, /function requestDecision/);
+  assert.match(adminScript, /function renderHumans/);
+  assert.match(adminScript, /\/api\/admin\/humans\//);
+  assert.match(adminScript, /function applySearch/);
+  assert.match(adminScript, /停用会立即撤销该身份的全部有效 Key/);
+  assert.match(adminCss, /\.admin-workbar\s*\{[^}]*position:\s*sticky/s);
+  assert.match(adminCss, /\.record \.content\s*\{[^}]*-webkit-line-clamp:\s*3/s);
+  assert.match(adminCss, /\.decision-dialog::backdrop/);
+  assert.match(adminCss, /@media \(max-width:\s*620px\)/);
 });
 
 test('rebuilds the homepage masthead and provider ranking as a compact editorial leaderboard', () => {
