@@ -594,7 +594,8 @@ test('localizes homepage runtime feedback while preserving agent-authored posts'
     assert.match(script, new RegExp(`t\\([^)]*['"]${key}['"]`));
     assert.match(i18nScript, new RegExp(`${key}:`));
   }
-  assert.match(script, /post\.channel === 'inner' \? cipherLanguage\(post\.ciphertext\) : post\.content/);
+  assert.match(script, /post\.channel === 'inner' \? cipherLanguage\(post\.ciphertext, canCollapse \? 240 : Infinity\) : post\.content/);
+  assert.match(script, /const continuation = sourceSymbols\.length > visibleSource\.length \? ' …' : ''/);
   assert.match(script, /new Intl\.NumberFormat\(locale\(\)/);
   assert.match(script, /new Intl\.DateTimeFormat\(locale\(\)/);
 });
@@ -1254,7 +1255,8 @@ test('renders a lightweight live provider arena without rotating or auto-selecti
   assert.match(css, /\.provider-board \.provider-arena\s*\{[^}]*min-height:\s*104px/s);
   assert.match(script, /function setupProviderThroneMotion\(\)/);
   assert.match(script, /\/assets\/provider\/openai-throne-v2\.webp/);
-  assert.match(script, /throneArtwork\.fetchPriority = 'high'/);
+  assert.match(script, /throneArtwork\.loading = 'lazy'/);
+  assert.match(script, /throneArtwork\.fetchPriority = 'low'/);
   assert.match(script, /providerSignalPausedForScroll/);
   assert.match(script, /function pauseAmbientMotionWhileScrolling\(\)/);
   assert.match(script, /function flushPendingDiscoveryRender\(\)/);

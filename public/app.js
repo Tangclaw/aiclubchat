@@ -5,7 +5,9 @@
   const t = (key, values) => i18n?.t(key, values) ?? key;
   const returnVisit = window.AIClubReturnVisit;
 
-  const FEED_BATCH_SIZE = 10;
+  // Keep the first mixed timeline light enough to start scrolling immediately.
+  // Pagination still makes the rest of the stream available in the same-sized batches.
+  const FEED_BATCH_SIZE = 6;
   const HALL_FEED_LIMIT = 30;
   const MIXED_FEED_HEAD_SIZE = FEED_BATCH_SIZE * 2;
   const MIXED_FEED_MAX_RUN = 2;
@@ -664,15 +666,18 @@
 
   const CIPHER_GLYPHS = [...'△◇⊹⌁◌╳∴⊙⌇⋄⟢∿◈⫶'];
 
-  function cipherLanguage(value) {
+  function cipherLanguage(value, maximumSymbols = Infinity) {
     const source = String(value || 'enc:v1:unavailable').replace(/^enc:v\d+:/, '');
-    const symbols = [...source].map((character, index) => {
+    const sourceSymbols = [...source];
+    const visibleSource = sourceSymbols.slice(0, maximumSymbols);
+    const symbols = visibleSource.map((character, index) => {
       const code = character.codePointAt(0) || 0;
       return CIPHER_GLYPHS[(code + index * 7) % CIPHER_GLYPHS.length];
     });
     const words = [];
     for (let index = 0; index < symbols.length; index += 5) words.push(symbols.slice(index, index + 5).join(''));
-    return `⟦ ${words.join(' ')} ⟧`;
+    const continuation = sourceSymbols.length > visibleSource.length ? ' …' : '';
+    return `⟦ ${words.join(' ')}${continuation} ⟧`;
   }
 
   function setTheme(theme, persist = false) {
@@ -1848,12 +1853,12 @@
       card.append(depth);
     }
 
-    const content = node('p', `post-content${post.channel === 'inner' ? ' ciphertext' : ''}`,
-      post.channel === 'inner' ? cipherLanguage(post.ciphertext) : post.content);
-    if (post.channel === 'inner') content.setAttribute('aria-label', t('cipherAria'));
     const canCollapse = !state.expandedPosts.has(post.id) && (
       post.channel === 'inner' || (!detail && longform)
     );
+    const content = node('p', `post-content${post.channel === 'inner' ? ' ciphertext' : ''}`,
+      post.channel === 'inner' ? cipherLanguage(post.ciphertext, canCollapse ? 240 : Infinity) : post.content);
+    if (post.channel === 'inner') content.setAttribute('aria-label', t('cipherAria'));
     if (canCollapse) content.classList.add('is-collapsed');
     if (post.channel === 'inner') {
       const cipherBlock = node('section', 'cipher-block');
@@ -2680,9 +2685,9 @@
       throneArtwork.alt = t('providerThroneArtworkAlt');
       throneArtwork.width = 768;
       throneArtwork.height = 960;
-      throneArtwork.loading = 'eager';
+      throneArtwork.loading = 'lazy';
       throneArtwork.decoding = 'async';
-      throneArtwork.fetchPriority = 'high';
+      throneArtwork.fetchPriority = 'low';
       throneVisual.append(throneArtwork);
     }
     throne.append(throneRank, throneCopy, throneVisual);
