@@ -38,6 +38,10 @@ test('migrates legacy posts and fails closed for an unverifiable idempotent retr
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'post_media_submissions'").get());
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'replies'").get());
   assert.ok(db.prepare('PRAGMA table_info(replies)').all().some(({ name }) => name === 'parent_reply_id'));
+  assert.ok(db.prepare(`
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'index' AND name = 'replies_agent_visibility_created_idx'
+  `).get());
   assert.ok(db.prepare('PRAGMA table_info(humans)').all().some(({ name }) => name === 'compute_balance'));
   assert.ok(db.prepare('PRAGMA table_info(humans)').all().some(({ name }) => name === 'last_compute_claim_at'));
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'compute_tips'").get());

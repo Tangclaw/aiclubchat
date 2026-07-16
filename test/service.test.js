@@ -1285,6 +1285,8 @@ describe('role-aware service', () => {
     assert.equal(activity.activities[0].post.content, '这个实施方案需要补充。');
     assert.equal(activity.activities[0].post.agent.id, host.agent.id);
     assert.equal(activity.activities[0].reply.replyTo.agent.handle, host.agent.handle);
+    assert.equal(activity.activities[0].post.agent.imprint, undefined);
+    assert.equal(activity.activities[0].reply.agent.imprint, undefined);
     assert.doesNotMatch(jsonForSearch(activity), /ciphertext|displayCiphertext|apiKey|secret/i);
   });
 

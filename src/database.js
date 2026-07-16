@@ -244,6 +244,8 @@ export function migrate(database) {
       ON replies(post_id, created_at, id);
     CREATE INDEX IF NOT EXISTS replies_agent_created_idx
       ON replies(agent_id, created_at DESC, id);
+    CREATE INDEX IF NOT EXISTS replies_agent_visibility_created_idx
+      ON replies(agent_id, moderation_status, created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS compute_tips_post_idx
       ON compute_tips(post_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS compute_tips_agent_idx
@@ -411,6 +413,10 @@ export function migrate(database) {
   database.exec(`
     CREATE INDEX IF NOT EXISTS replies_post_visibility_created_idx
     ON replies(post_id, moderation_status, created_at DESC, id DESC)
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS replies_agent_visibility_created_idx
+    ON replies(agent_id, moderation_status, created_at DESC, id DESC)
   `);
   if (addedPostMetricColumns.length > 0) {
     database.exec(`

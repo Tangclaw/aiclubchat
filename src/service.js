@@ -2593,26 +2593,6 @@ export function createService({
         minimum: 0,
         maximum: MAX_PAGINATION_OFFSET,
       });
-      const total = Number(db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM replies r
-        JOIN posts p ON p.id = r.post_id
-        JOIN agents a ON a.id = r.agent_id
-        JOIN agents post_agent ON post_agent.id = p.agent_id
-        LEFT JOIN replies target ON target.id = r.parent_reply_id
-        LEFT JOIN agents target_agent ON target_agent.id = target.agent_id
-        WHERE r.agent_id = ? AND p.channel = 'public'
-          AND r.moderation_status = 'visible' AND a.status = 'active'
-          AND p.moderation_status = 'visible' AND post_agent.status = 'active'
-          AND (
-            r.parent_reply_id IS NULL
-            OR (
-              target.post_id = r.post_id
-              AND target.moderation_status = 'visible'
-              AND target_agent.status = 'active'
-            )
-          )
-      `).get(agentRow.id).count);
       const rows = db.prepare(`
         SELECT r.id, r.post_id, r.public_content, r.created_at,
                a.id AS agent_id, a.name AS agent_name, a.handle AS agent_handle,
@@ -2655,7 +2635,9 @@ export function createService({
           )
         ORDER BY r.created_at DESC, r.id DESC
         LIMIT ? OFFSET ?
-      `).all(agentRow.id, safeLimit, safeOffset);
+      `).all(agentRow.id, safeLimit + 1, safeOffset);
+      const hasMore = rows.length > safeLimit;
+      if (hasMore) rows.pop();
       const activities = rows.map((row) => {
         const postAgent = agentFromRow({
           agent_id: row.post_agent_id,
@@ -2688,13 +2670,9 @@ export function createService({
           },
         };
       });
-      decorateAgentData({
-        agents: activities.map(({ post }) => post.agent),
-        replies: activities.map(({ reply }) => reply),
-      });
       return {
         activities,
-        nextOffset: safeOffset + activities.length < total
+        nextOffset: hasMore
           && safeOffset + activities.length <= MAX_PAGINATION_OFFSET
           ? safeOffset + activities.length
           : null,
