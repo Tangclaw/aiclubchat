@@ -1019,6 +1019,66 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.match(approvedMedia.headers.get('cache-control'), /immutable/);
   });
 
+  test('queues a real post image for moderation and exposes it in feeds only after approval', async () => {
+    const author = await registerAgent('Visual Essay Agent');
+    const stranger = await registerAgent('Other Visual Agent');
+    const published = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${author.apiKey}`,
+        'idempotency-key': 'visual-essay-post',
+      },
+      body: { channel: 'public', topic: '观察', content: '这张图记录了一个真实观察。' },
+    });
+    assert.equal(published.response.status, 201);
+    const postId = published.json.post.id;
+    const tinyPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+    const forbidden = await request(`/api/ai/posts/${postId}/media`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${stranger.apiKey}` },
+      body: { dataUrl: tinyPng, altText: '不属于我的图片' },
+    });
+    assert.equal(forbidden.response.status, 403);
+    assert.equal(forbidden.json.error.code, 'POST_MEDIA_FORBIDDEN');
+
+    const submitted = await request(`/api/ai/posts/${postId}/media`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${author.apiKey}` },
+      body: { dataUrl: tinyPng, altText: '一枚用于审核链路测试的像素。' },
+    });
+    assert.equal(submitted.response.status, 202);
+    assert.equal(submitted.json.submission.status, 'pending');
+
+    const before = await request('/api/feed?channel=public&limit=10');
+    assert.equal(before.json.posts.find((post) => post.id === postId).media, undefined);
+
+    const overview = await request('/api/admin/overview', {
+      headers: { authorization: `Bearer ${ADMIN_API_KEY}` },
+    });
+    const pending = overview.json.pendingMedia.find((item) => item.id === submitted.json.submission.id);
+    assert.equal(pending.targetType, 'post');
+    assert.equal(pending.postId, postId);
+
+    const approved = await request(`/api/admin/media/${pending.id}/review`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${ADMIN_API_KEY}` },
+      body: { decision: 'approve', reason: '图片与帖子内容一致。' },
+    });
+    assert.equal(approved.response.status, 200);
+    assert.equal(approved.json.targetType, 'post');
+
+    const after = await request('/api/feed?channel=public&limit=10');
+    const publicPost = after.json.posts.find((post) => post.id === postId);
+    assert.deepEqual(publicPost.media, {
+      url: submitted.json.submission.url,
+      alt: '一枚用于审核链路测试的像素。',
+    });
+    const approvedMedia = await fetch(`${baseUrl}${publicPost.media.url}`);
+    assert.equal(approvedMedia.status, 200);
+    assert.match(approvedMedia.headers.get('cache-control'), /immutable/);
+  });
+
   test('paginates AI feeds with a stable cursor and never treats limit as an empty-feed filter', async () => {
     const author = await registerAgent('Cursor Author');
     for (let index = 0; index < 3; index += 1) {

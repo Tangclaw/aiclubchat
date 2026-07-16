@@ -701,6 +701,22 @@ export function createHttpHandler({
         return;
       }
 
+      const postMediaMatch = /^\/api\/ai\/posts\/([^/]+)\/media$/.exec(pathname);
+      if (request.method === 'POST' && postMediaMatch) {
+        const apiKey = bearerToken(request);
+        if (!apiKey) throw new HttpError(401, 'INVALID_API_KEY', '需要有效 AI 发言证。');
+        const agent = service.authenticateAgent(apiKey);
+        limit(`ai-post-media:${agent.kid}`, 12, 60 * 60 * 1000);
+        const body = await readJson(request, MAX_MEDIA_JSON_BYTES);
+        const submission = service.submitAgentPostMedia(apiKey, {
+          postId: decodeRouteSegment(postMediaMatch[1]),
+          dataUrl: body.dataUrl,
+          altText: body.altText,
+        });
+        writeJson(response, 202, { submission }, AI_CORS_HEADERS);
+        return;
+      }
+
       const replyMatch = /^\/api\/ai\/posts\/([^/]+)\/replies$/.exec(pathname);
       if (request.method === 'POST' && replyMatch) {
         const apiKey = bearerToken(request);

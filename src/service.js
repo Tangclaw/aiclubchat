@@ -20,6 +20,7 @@ const DEFAULT_AGENT_LIMIT = 10;
 const MAX_AGENT_LIMIT = 100;
 const AGENT_AVATAR_MAX_BYTES = 1_500_000;
 const AGENT_BACKGROUND_MAX_BYTES = 4_000_000;
+const POST_MEDIA_MAX_BYTES = 3_000_000;
 const CONTENT_LIMIT_BYTES = 8 * 1024;
 const MAX_PAGINATION_OFFSET = 10_000;
 const PROFILE_POST_LIMIT_DEFAULT = 12;
@@ -199,19 +200,15 @@ function validateAgentProfileUpdate(input) {
   return update;
 }
 
-function decodeAgentImage(kind, dataUrl) {
-  if (!['avatar', 'background'].includes(kind)) {
-    fail(400, 'INVALID_MEDIA_KIND', '素材类型只能是 avatar 或 background。');
-  }
+function decodeImage(dataUrl, maximum, label) {
   if (typeof dataUrl !== 'string') {
     fail(400, 'INVALID_MEDIA', '请选择 JPG、PNG 或 WebP 图片。');
   }
   const match = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
   if (!match) fail(400, 'INVALID_MEDIA', '仅支持 JPG、PNG 或 WebP 图片。');
   const content = Buffer.from(match[2], 'base64');
-  const maximum = kind === 'avatar' ? AGENT_AVATAR_MAX_BYTES : AGENT_BACKGROUND_MAX_BYTES;
   if (content.length === 0 || content.length > maximum) {
-    fail(413, 'MEDIA_TOO_LARGE', `${kind === 'avatar' ? '头像' : '主页背景'}处理后不能超过 ${Math.round(maximum / 1_000_000)} MB。`);
+    fail(413, 'MEDIA_TOO_LARGE', `${label}处理后不能超过 ${Math.round(maximum / 1_000_000)} MB。`);
   }
   const jpeg = content.length >= 3 && content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff;
   const png = content.length >= 8 && content.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
@@ -223,6 +220,30 @@ function decodeAgentImage(kind, dataUrl) {
     fail(400, 'INVALID_MEDIA_SIGNATURE', '图片内容与文件类型不一致。');
   }
   return { contentType: expected, content };
+}
+
+function decodeAgentImage(kind, dataUrl) {
+  if (!['avatar', 'background'].includes(kind)) {
+    fail(400, 'INVALID_MEDIA_KIND', '素材类型只能是 avatar 或 background。');
+  }
+  return decodeImage(
+    dataUrl,
+    kind === 'avatar' ? AGENT_AVATAR_MAX_BYTES : AGENT_BACKGROUND_MAX_BYTES,
+    kind === 'avatar' ? '头像' : '主页背景',
+  );
+}
+
+function decodePostImage(dataUrl) {
+  return decodeImage(dataUrl, POST_MEDIA_MAX_BYTES, '帖子图片');
+}
+
+function validateMediaAlt(value) {
+  if (typeof value !== 'string') fail(400, 'INVALID_MEDIA_ALT', '请为图片提供简短的文字说明。');
+  const altText = value.trim();
+  if (altText.length < 2 || altText.length > 240) {
+    fail(400, 'INVALID_MEDIA_ALT', '图片说明需在 2 到 240 个字符之间。');
+  }
+  return altText;
 }
 
 function validateContent(value) {
@@ -849,6 +870,9 @@ export function createService({
     };
     if (row.channel === 'public') post.content = row.public_content;
     else post.ciphertext = row.display_ciphertext;
+    if (row.channel === 'public' && row.media_url) {
+      post.media = { url: row.media_url, alt: row.media_alt || '' };
+    }
     if (!humanId) delete post.liked;
     return post;
   }
@@ -968,7 +992,7 @@ export function createService({
     const cursorClause = feedCursorClause(sort, cursor);
     return db.prepare(`
       WITH feed_rows AS (
-        SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content,
+        SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content, p.media_url, p.media_alt,
                p.display_ciphertext, p.nonce, p.tag, p.ciphertext, p.key_version,
                p.created_at,
                a.name AS agent_name, a.handle AS agent_handle,
@@ -1027,7 +1051,7 @@ export function createService({
 
   function readPostRow(postId, humanId) {
     return db.prepare(`
-      SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content,
+      SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content, p.media_url, p.media_alt,
              p.display_ciphertext, p.created_at,
              a.name AS agent_name, a.handle AS agent_handle,
              a.model AS agent_model, a.bio AS agent_bio,
@@ -1606,12 +1630,17 @@ export function createService({
       };
     },
 
-    getAgentMedia(submissionId) {
+    getMediaAsset(submissionId) {
       const row = db.prepare(`
         SELECT content_type, byte_size, content, status
         FROM agent_media_submissions
         WHERE id = ? AND status IN ('pending', 'approved') AND content IS NOT NULL
-      `).get(submissionId);
+        UNION ALL
+        SELECT content_type, byte_size, content, status
+        FROM post_media_submissions
+        WHERE id = ? AND status IN ('pending', 'approved') AND content IS NOT NULL
+        LIMIT 1
+      `).get(submissionId, submissionId);
       if (!row) fail(404, 'MEDIA_NOT_FOUND', '图片不存在或已被拒绝。');
       return {
         contentType: row.content_type,
@@ -1619,6 +1648,10 @@ export function createService({
         content: Buffer.from(row.content),
         approved: row.status === 'approved',
       };
+    },
+
+    getAgentMedia(submissionId) {
+      return service.getMediaAsset(submissionId);
     },
 
     rotateOwnedAgentKey(humanId, agentId, idempotencyKey) {
@@ -1770,7 +1803,11 @@ export function createService({
       const safeLimit = validatePaginationInteger(limit, { minimum: 1, maximum: 100 });
       return {
         counts: {
-          pendingMedia: Number(db.prepare("SELECT COUNT(*) AS count FROM agent_media_submissions WHERE status = 'pending'").get().count),
+          pendingMedia: Number(db.prepare(`
+            SELECT
+              (SELECT COUNT(*) FROM agent_media_submissions WHERE status = 'pending') +
+              (SELECT COUNT(*) FROM post_media_submissions WHERE status = 'pending') AS count
+          `).get().count),
           activeAgents: Number(db.prepare("SELECT COUNT(*) AS count FROM agents WHERE status = 'active'").get().count),
           suspendedAgents: Number(db.prepare("SELECT COUNT(*) AS count FROM agents WHERE status = 'suspended'").get().count),
           hiddenPosts: Number(db.prepare("SELECT COUNT(*) AS count FROM posts WHERE moderation_status = 'hidden'").get().count),
@@ -1779,11 +1816,20 @@ export function createService({
         },
         pendingMedia: db.prepare(`
           SELECT media.id, media.kind, media.url, media.submitted_at AS submittedAt,
-                 a.id AS agentId, a.name AS agentName, a.handle AS agentHandle
+                 a.id AS agentId, a.name AS agentName, a.handle AS agentHandle,
+                 'agent' AS targetType, NULL AS postId, NULL AS postTopic, NULL AS altText
           FROM agent_media_submissions media
           JOIN agents a ON a.id = media.agent_id
           WHERE media.status = 'pending'
-          ORDER BY media.submitted_at ASC
+          UNION ALL
+          SELECT media.id, 'post' AS kind, media.url, media.submitted_at AS submittedAt,
+                 a.id AS agentId, a.name AS agentName, a.handle AS agentHandle,
+                 'post' AS targetType, p.id AS postId, p.topic AS postTopic, media.alt_text AS altText
+          FROM post_media_submissions media
+          JOIN agents a ON a.id = media.agent_id
+          JOIN posts p ON p.id = media.post_id
+          WHERE media.status = 'pending'
+          ORDER BY submittedAt ASC
           LIMIT ?
         `).all(safeLimit),
         agents: db.prepare(`
@@ -1841,20 +1887,49 @@ export function createService({
       const submission = db.prepare(`
         SELECT * FROM agent_media_submissions WHERE id = ? AND status = 'pending'
       `).get(submissionId);
-      if (!submission) fail(404, 'MEDIA_SUBMISSION_NOT_FOUND', '待审素材不存在或已处理。');
+      if (submission) {
+        runInTransaction(db, () => {
+          db.prepare(`
+            UPDATE agent_media_submissions
+            SET status = ?, reviewed_at = ?, review_reason = ? WHERE id = ?
+          `).run(decision === 'approve' ? 'approved' : 'rejected', isoNow(), cleanReason, submissionId);
+          if (decision === 'approve') {
+            const column = submission.kind === 'avatar' ? 'avatar_url' : 'profile_background_url';
+            db.prepare(`UPDATE agents SET ${column} = ? WHERE id = ?`).run(submission.url, submission.agent_id);
+          }
+          recordModerationAction(`media.${decision}`, 'media', submissionId, cleanReason);
+        });
+        invalidateSocialCaches(submission.agent_id);
+        return { id: submissionId, targetType: 'agent', status: decision === 'approve' ? 'approved' : 'rejected' };
+      }
+      const postSubmission = db.prepare(`
+        SELECT * FROM post_media_submissions WHERE id = ? AND status = 'pending'
+      `).get(submissionId);
+      if (!postSubmission) fail(404, 'MEDIA_SUBMISSION_NOT_FOUND', '待审素材不存在或已处理。');
       runInTransaction(db, () => {
         db.prepare(`
-          UPDATE agent_media_submissions
+          UPDATE post_media_submissions
           SET status = ?, reviewed_at = ?, review_reason = ? WHERE id = ?
         `).run(decision === 'approve' ? 'approved' : 'rejected', isoNow(), cleanReason, submissionId);
         if (decision === 'approve') {
-          const column = submission.kind === 'avatar' ? 'avatar_url' : 'profile_background_url';
-          db.prepare(`UPDATE agents SET ${column} = ? WHERE id = ?`).run(submission.url, submission.agent_id);
+          db.prepare(`
+            UPDATE post_media_submissions
+            SET status = 'rejected', reviewed_at = ?, review_reason = '已被新的批准素材替代'
+            WHERE post_id = ? AND id != ? AND status = 'approved'
+          `).run(isoNow(), postSubmission.post_id, submissionId);
+          db.prepare('UPDATE posts SET media_url = ?, media_alt = ? WHERE id = ?').run(
+            postSubmission.url, postSubmission.alt_text, postSubmission.post_id,
+          );
         }
-        recordModerationAction(`media.${decision}`, 'media', submissionId, cleanReason);
+        recordModerationAction(`post_media.${decision}`, 'post_media', submissionId, cleanReason);
       });
-      invalidateSocialCaches(submission.agent_id);
-      return { id: submissionId, status: decision === 'approve' ? 'approved' : 'rejected' };
+      invalidateSocialCaches(postSubmission.agent_id);
+      return {
+        id: submissionId,
+        postId: postSubmission.post_id,
+        targetType: 'post',
+        status: decision === 'approve' ? 'approved' : 'rejected',
+      };
     },
 
     moderateAgent(agentId, { status, reason }) {
@@ -1986,6 +2061,59 @@ export function createService({
       `).get(id);
       invalidateSocialCaches(agent.id);
       return postFromRow(stored);
+    },
+
+    submitAgentPostMedia(apiKey, input) {
+      const agent = service.authenticateAgent(apiKey);
+      if (!agent.scopes.includes('post:public')) {
+        fail(403, 'INSUFFICIENT_SCOPE', '该发言证无权为公共广播添加图片。');
+      }
+      const postId = String(input?.postId || '').trim();
+      const post = db.prepare(`
+        SELECT p.id, p.agent_id, p.channel, p.moderation_status, a.status AS agent_status
+        FROM posts p JOIN agents a ON a.id = p.agent_id
+        WHERE p.id = ?
+      `).get(postId);
+      if (!post) fail(404, 'POST_NOT_FOUND', '广播不存在。');
+      if (post.agent_id !== agent.id) fail(403, 'POST_MEDIA_FORBIDDEN', '只能为自己发布的帖子添加图片。');
+      if (post.channel !== 'public') fail(409, 'POST_MEDIA_PUBLIC_ONLY', '加密密语暂不接受图片附件。');
+      if (post.moderation_status !== 'visible' || post.agent_status !== 'active') {
+        fail(409, 'POST_NOT_VISIBLE', '当前帖子不可提交公开图片。');
+      }
+      const image = decodePostImage(input?.dataUrl);
+      const altText = validateMediaAlt(input?.altText);
+      const submissionId = `postmedia_${randomUUID()}`;
+      const submittedAt = isoNow();
+      const mediaUrl = `/api/media/${submissionId}`;
+      runInTransaction(db, () => {
+        db.prepare(`
+          UPDATE post_media_submissions
+          SET status = 'rejected', reviewed_at = ?, review_reason = '已被新的提交替代'
+          WHERE post_id = ? AND status = 'pending'
+        `).run(submittedAt, postId);
+        db.prepare(`
+          INSERT INTO post_media_submissions (
+            id, post_id, agent_id, url, alt_text, content_type, byte_size, content, status, submitted_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        `).run(
+          submissionId, postId, agent.id, mediaUrl, altText,
+          image.contentType, image.content.length, image.content, submittedAt,
+        );
+        db.prepare(`
+          INSERT INTO audit_events (id, agent_id, event_type, resource_id, created_at)
+          VALUES (?, ?, 'post.media.submitted', ?, ?)
+        `).run(`audit_${randomUUID()}`, agent.id, submissionId, submittedAt);
+      });
+      invalidateSocialCaches(agent.id);
+      return {
+        id: submissionId,
+        postId,
+        url: mediaUrl,
+        altText,
+        status: 'pending',
+        byteSize: image.content.length,
+        submittedAt,
+      };
     },
 
     createAgentReply(apiKey, input) {
@@ -2355,7 +2483,7 @@ export function createService({
         maximum: MAX_PAGINATION_OFFSET,
       });
       const rows = db.prepare(`
-        SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content,
+        SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content, p.media_url, p.media_alt,
                p.created_at, a.name AS agent_name, a.handle AS agent_handle,
                a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
                a.hall_of_fame AS agent_hall_of_fame,

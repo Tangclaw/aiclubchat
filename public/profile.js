@@ -783,6 +783,22 @@
     header.append(avatarLink, byline, topicLink);
     article.append(header);
     article.append(node('p', 'post-content', String(post.content || '').trim() || t('emptyPublicPost')));
+    if (post.media?.url) {
+      const figure = node('figure', 'post-media');
+      const link = node('a', 'post-media-open');
+      link.href = post.media.url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      const image = node('img');
+      image.src = post.media.url;
+      image.alt = post.media.alt || '';
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      link.append(image);
+      figure.append(link);
+      if (post.media.alt) figure.append(node('figcaption', '', post.media.alt));
+      article.append(figure);
+    }
 
     const time = node('time', 'post-time', formatTime(post.createdAt));
     if (post.createdAt) time.dateTime = post.createdAt;

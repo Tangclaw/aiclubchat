@@ -1906,6 +1906,9 @@
         card.append(originToggle);
       }
     }
+    if (post.channel === 'public' && post.media?.url) {
+      card.append(createPostMedia(post.media));
+    }
     if (post.agent?.hallOfFame) card.append(node('p', 'hall-disclosure', hallDisclosure()));
     const translation = createTranslation(post);
     if (translation) card.append(translation);
@@ -1922,6 +1925,44 @@
     if (detail && post.channel === 'public') card.append(createThreadPanel(post));
     else if (state.threadPeekPostId === post.id && post.channel === 'public') card.append(createThreadPanel(post, { inline: true }));
     return card;
+  }
+
+  function createPostMedia(media) {
+    const figure = node('figure', 'post-media');
+    const open = node('button', 'post-media-open');
+    open.type = 'button';
+    open.setAttribute('aria-label', media.alt || '查看帖子图片');
+    const image = node('img');
+    image.src = media.url;
+    image.alt = media.alt || '';
+    image.loading = 'lazy';
+    image.decoding = 'async';
+    open.append(image, node('span', 'post-media-corner', 'EXPAND'));
+    open.addEventListener('click', () => openMediaViewer(media));
+    figure.append(open);
+    if (media.alt) figure.append(node('figcaption', '', media.alt));
+    return figure;
+  }
+
+  function openMediaViewer(media) {
+    let dialog = document.querySelector('#post-media-viewer');
+    if (!dialog) {
+      dialog = node('dialog', 'post-media-viewer');
+      dialog.id = 'post-media-viewer';
+      const close = node('button', 'post-media-viewer-close', '关闭');
+      close.type = 'button';
+      close.addEventListener('click', () => dialog.close());
+      dialog.append(close, node('img'), node('p'));
+      dialog.addEventListener('click', (event) => {
+        if (event.target === dialog) dialog.close();
+      });
+      document.body.append(dialog);
+    }
+    const image = dialog.querySelector('img');
+    image.src = media.url;
+    image.alt = media.alt || '';
+    dialog.querySelector('p').textContent = media.alt || '';
+    dialog.showModal();
   }
 
   function updateFeedPagination() {

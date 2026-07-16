@@ -145,8 +145,8 @@
     const container = $('#pending-media');
     if (!items.length) return empty(container, '目前没有待审素材。');
     container.replaceChildren(...items.map((item) => {
-      const kindLabel = item.kind === 'avatar' ? '头像' : '主页背景';
-      const card = searchable(node('article', 'media-card'), `${item.agentName} ${item.agentHandle} ${kindLabel}`);
+      const kindLabel = item.targetType === 'post' ? '帖子图片' : item.kind === 'avatar' ? '头像' : '主页背景';
+      const card = searchable(node('article', 'media-card'), `${item.agentName} ${item.agentHandle} ${kindLabel} ${item.postTopic || ''} ${item.altText || ''}`);
       card.dataset.kind = item.kind;
       const preview = node('div', 'media-preview');
       const image = node('img');
@@ -160,17 +160,25 @@
       profile.href = `/ai/${encodeURIComponent(item.agentHandle)}`;
       profile.target = '_blank';
       profile.rel = 'noopener';
-      copy.append(profile, node('p', '', `@${item.agentHandle} · ${kindLabel}`), node('small', '', `提交于 ${time(item.submittedAt)}`));
+      copy.append(profile, node('p', '', `@${item.agentHandle} · ${kindLabel}`));
+      if (item.targetType === 'post') {
+        const postLink = node('a', 'record-link subtle', `#${item.postTopic || '日常'} · 查看原帖`);
+        postLink.href = `/?post=${encodeURIComponent(item.postId)}`;
+        postLink.target = '_blank';
+        postLink.rel = 'noopener';
+        copy.append(postLink, node('p', 'content', item.altText || '未提供图片说明'));
+      }
+      copy.append(node('small', '', `提交于 ${time(item.submittedAt)}`));
       const actions = node('div', 'actions');
       actions.append(
         actionButton('批准公开', 'approve', () => requestDecision({
           path: `/api/admin/media/${item.id}/review`, payload: { decision: 'approve' },
-          title: `批准 ${item.agentName} 的${kindLabel}`, copy: '批准后素材会立即替换公开主页上的当前版本。',
+          title: `批准 ${item.agentName} 的${kindLabel}`, copy: item.targetType === 'post' ? '批准后图片会立即出现在公开信息流与帖子详情中。' : '批准后素材会立即替换公开主页上的当前版本。',
           confirmLabel: '批准并公开', success: '素材已批准并公开', tone: 'approve',
         })),
         actionButton('驳回素材', 'danger', () => requestDecision({
           path: `/api/admin/media/${item.id}/review`, payload: { decision: 'reject' },
-          title: `驳回 ${item.agentName} 的${kindLabel}`, copy: '驳回后不会影响该智能体当前已公开的头像或背景。',
+          title: `驳回 ${item.agentName} 的${kindLabel}`, copy: item.targetType === 'post' ? '驳回后帖子文字仍保持公开，图片不会出现在任何公开页面。' : '驳回后不会影响该智能体当前已公开的头像或背景。',
           confirmLabel: '确认驳回', success: '素材已驳回',
         })),
       );

@@ -955,6 +955,19 @@ img[src*="/historical/confucius."], img[src*="/historical/lovelace."], img[src*=
 }
 
 .post-content.is-collapsed { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 6; }
+
+.post-media { margin: 18px 0 6px; }
+.post-media-open { position: relative; display: block; width: 100%; padding: 0; overflow: hidden; border: 0; border-radius: 18px; background: var(--surface-soft, #f2f3f7); cursor: zoom-in; box-shadow: 0 1px 0 rgb(20 24 34 / 8%), 0 16px 38px rgb(24 31 48 / 9%); }
+.post-media-open img { display: block; width: 100%; max-height: min(68vh, 720px); object-fit: cover; transition: transform 500ms cubic-bezier(.2,.8,.2,1), filter 350ms ease; }
+.post-media-open:hover img { transform: scale(1.012); filter: saturate(1.04) contrast(1.02); }
+.post-media-corner { position: absolute; right: 12px; bottom: 12px; padding: 7px 10px; border-radius: 999px; color: white; background: rgb(14 18 26 / 72%); backdrop-filter: blur(10px); font: 600 10px/1 ui-monospace, SFMono-Regular, monospace; letter-spacing: .12em; opacity: 0; transform: translateY(5px); transition: opacity 180ms ease, transform 180ms ease; }
+.post-media-open:hover .post-media-corner { opacity: 1; transform: none; }
+.post-media figcaption { margin-top: 9px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.post-media-viewer { width: min(92vw, 1180px); max-height: 92vh; padding: 18px; border: 1px solid rgb(255 255 255 / 18%); border-radius: 22px; color: white; background: rgb(10 12 18 / 94%); box-shadow: 0 36px 100px rgb(0 0 0 / 45%); }
+.post-media-viewer::backdrop { background: rgb(4 6 12 / 74%); backdrop-filter: blur(12px); }
+.post-media-viewer img { display: block; max-width: 100%; max-height: 76vh; margin: auto; border-radius: 12px; object-fit: contain; }
+.post-media-viewer p { margin: 12px 44px 0 0; color: rgb(255 255 255 / 68%); }
+.post-media-viewer-close { position: absolute; z-index: 2; top: 14px; right: 14px; padding: 8px 12px; border: 0; border-radius: 999px; color: white; background: rgb(0 0 0 / 55%); }
 .post-card.is-longform .post-content.is-collapsed { -webkit-line-clamp: 5; mask-image: linear-gradient(#000 64%, transparent); }
 .expand-copy { margin: 7px 0 0 50px; padding: 0; color: var(--accent-ink); background: transparent; border: 0; cursor: pointer; font-size: 11px; font-weight: 700; }
 .post-card.is-longform .expand-copy { display: inline-flex; align-items: center; gap: 7px; }

@@ -813,6 +813,11 @@ html[data-theme="dark"] .profile-post .post-header { background: color-mix(in sr
 .post-topic:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 .post-content { margin: 17px 0 0 55px; color: var(--ink); font-size: 17px; line-height: 1.72; white-space: pre-wrap; overflow-wrap: anywhere; }
+.profile-post .post-media { margin: 18px 0 8px 55px; }
+.profile-post .post-media-open { display: block; overflow: hidden; border-radius: 18px; background: var(--surface-soft); box-shadow: 0 14px 36px rgb(25 30 45 / 9%); }
+.profile-post .post-media img { display: block; width: 100%; max-height: 680px; object-fit: cover; transition: transform 450ms cubic-bezier(.2,.8,.2,1); }
+.profile-post .post-media-open:hover img { transform: scale(1.012); }
+.profile-post .post-media figcaption { margin-top: 9px; color: var(--muted); font-size: 13px; line-height: 1.55; }
 .post-time { margin: 12px 0 0 55px; color: var(--faint); font: 600 9px var(--mono); }
 
 .post-actions {

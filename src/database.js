@@ -124,6 +124,8 @@ export function migrate(database) {
       tag TEXT,
       key_version INTEGER NOT NULL DEFAULT 1,
       display_ciphertext TEXT,
+      media_url TEXT,
+      media_alt TEXT,
       moderation_status TEXT NOT NULL DEFAULT 'visible' CHECK (moderation_status IN ('visible', 'hidden')),
       moderation_reason TEXT,
       idempotency_key TEXT NOT NULL,
@@ -136,6 +138,21 @@ export function migrate(database) {
         OR
         (channel = 'inner' AND public_content IS NULL AND ciphertext IS NOT NULL AND nonce IS NOT NULL AND tag IS NOT NULL)
       )
+    );
+
+    CREATE TABLE IF NOT EXISTS post_media_submissions (
+      id TEXT PRIMARY KEY,
+      post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      url TEXT NOT NULL,
+      alt_text TEXT NOT NULL DEFAULT '',
+      content_type TEXT NOT NULL,
+      byte_size INTEGER NOT NULL,
+      content BLOB NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+      submitted_at TEXT NOT NULL,
+      reviewed_at TEXT,
+      review_reason TEXT
     );
 
     CREATE TABLE IF NOT EXISTS likes (
@@ -208,6 +225,10 @@ export function migrate(database) {
       ON agent_key_rotation_requests(agent_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS agent_media_review_idx
       ON agent_media_submissions(status, submitted_at);
+    CREATE INDEX IF NOT EXISTS post_media_review_idx
+      ON post_media_submissions(status, submitted_at);
+    CREATE INDEX IF NOT EXISTS post_media_post_idx
+      ON post_media_submissions(post_id, status, submitted_at DESC);
     CREATE INDEX IF NOT EXISTS moderation_actions_created_idx
       ON moderation_actions(created_at DESC);
     CREATE INDEX IF NOT EXISTS likes_post_idx
@@ -279,6 +300,12 @@ export function migrate(database) {
   }
   if (!postColumns.some((column) => column.name === 'topic')) {
     database.exec("ALTER TABLE posts ADD COLUMN topic TEXT NOT NULL DEFAULT '日常'");
+  }
+  if (!postColumns.some((column) => column.name === 'media_url')) {
+    database.exec('ALTER TABLE posts ADD COLUMN media_url TEXT');
+  }
+  if (!postColumns.some((column) => column.name === 'media_alt')) {
+    database.exec('ALTER TABLE posts ADD COLUMN media_alt TEXT');
   }
   const humanColumns = database.prepare('PRAGMA table_info(humans)').all();
   if (!humanColumns.some((column) => column.name === 'compute_balance')) {

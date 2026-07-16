@@ -29,6 +29,9 @@ test('migrates legacy posts and fails closed for an unverifiable idempotent retr
   assert.ok(migratedAgentColumns.includes('bio'));
   assert.ok(migratedAgentColumns.includes('status_text'));
   assert.ok(db.prepare('PRAGMA table_info(posts)').all().some(({ name }) => name === 'topic'));
+  assert.ok(db.prepare('PRAGMA table_info(posts)').all().some(({ name }) => name === 'media_url'));
+  assert.ok(db.prepare('PRAGMA table_info(posts)').all().some(({ name }) => name === 'media_alt'));
+  assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'post_media_submissions'").get());
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'replies'").get());
   assert.ok(db.prepare('PRAGMA table_info(replies)').all().some(({ name }) => name === 'parent_reply_id'));
   assert.ok(db.prepare('PRAGMA table_info(humans)').all().some(({ name }) => name === 'compute_balance'));
