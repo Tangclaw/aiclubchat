@@ -61,3 +61,63 @@ test('migrates legacy posts and fails closed for an unverifiable idempotent retr
   assert.ok(db.prepare("SELECT request_fingerprint FROM posts WHERE idempotency_key = 'new-key'").get().request_fingerprint);
   db.close();
 });
+
+test('revokes every ambiguous legacy credential before enforcing one current key per agent', () => {
+  const db = createDatabase(':memory:');
+  db.exec(`
+    CREATE TABLE agents (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, model TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL
+    );
+    CREATE TABLE agent_keys (
+      kid TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      secret_digest TEXT NOT NULL,
+      digest_version INTEGER NOT NULL DEFAULT 1,
+      scopes TEXT NOT NULL DEFAULT 'post:public,post:inner,read:public,read:inner',
+      created_at TEXT NOT NULL,
+      expires_at TEXT,
+      revoked_at TEXT,
+      last_used_at TEXT
+    );
+    INSERT INTO agents (id, name, model, status, created_at) VALUES
+      ('agent_conflict', 'CONFLICT', 'legacy', 'active', '2026-07-01T00:00:00.000Z'),
+      ('agent_blank', 'BLANK', 'legacy', 'active', '2026-07-01T00:00:00.000Z');
+    INSERT INTO agent_keys (kid, agent_id, secret_digest, created_at, revoked_at) VALUES
+      ('kid_a', 'agent_conflict', 'digest-a', '2026-07-01T00:00:00.000Z', NULL),
+      ('kid_b', 'agent_conflict', 'digest-b', '2026-07-02T00:00:00.000Z', NULL),
+      ('kid_blank', 'agent_blank', 'digest-blank', '2026-07-01T00:00:00.000Z', '');
+  `);
+
+  migrate(db);
+
+  assert.equal(
+    Number(db.prepare("SELECT COUNT(*) AS count FROM agent_keys WHERE agent_id = 'agent_conflict' AND revoked_at IS NULL").get().count),
+    0,
+  );
+  assert.ok(db.prepare("SELECT revoked_at FROM agent_keys WHERE kid = 'kid_blank'").get().revoked_at);
+  assert.ok(db.prepare(`
+    SELECT 1 FROM audit_events
+    WHERE agent_id = 'agent_conflict' AND event_type = 'agent.keys.conflict_revoked'
+  `).get());
+  assert.ok(db.prepare(`
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'index' AND name = 'agent_keys_one_current_idx'
+  `).get());
+
+  db.prepare(`
+    INSERT INTO agent_keys (kid, agent_id, secret_digest, created_at)
+    VALUES ('kid_reissued', 'agent_conflict', 'digest-reissued', '2026-07-03T00:00:00.000Z')
+  `).run();
+  assert.throws(() => db.prepare(`
+    INSERT INTO agent_keys (kid, agent_id, secret_digest, created_at)
+    VALUES ('kid_duplicate', 'agent_conflict', 'digest-duplicate', '2026-07-04T00:00:00.000Z')
+  `).run(), /UNIQUE constraint failed/);
+
+  migrate(db);
+  assert.equal(
+    Number(db.prepare("SELECT COUNT(*) AS count FROM agent_keys WHERE agent_id = 'agent_conflict' AND revoked_at IS NULL").get().count),
+    1,
+  );
+  db.close();
+});

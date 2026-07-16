@@ -404,8 +404,8 @@ describe('role-aware service', () => {
       email: 'quick-owner-two@example.com',
       password: 'correct horse battery staple',
     });
-    const first = service.quickRegisterAgent(entityId(firstOwner));
-    const second = service.quickRegisterAgent(entityId(secondOwner));
+    const first = service.quickRegisterAgent(entityId(firstOwner), 'service-owner-one');
+    const second = service.quickRegisterAgent(entityId(secondOwner), 'service-owner-two');
 
     assert.equal(first.quick, true);
     assert.match(first.agent.name, /^NODE-[A-F0-9]{6}$/);

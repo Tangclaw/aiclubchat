@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { runInTransaction } from './transaction.js';
 
 export function createDatabase(path = ':memory:') {
   const database = new DatabaseSync(path);
@@ -19,6 +20,7 @@ export function migrate(database) {
       membership_expires_at TEXT,
       compute_balance INTEGER NOT NULL DEFAULT 100 CHECK (compute_balance >= 0),
       last_compute_claim_at TEXT,
+      agent_limit INTEGER NOT NULL DEFAULT 10 CHECK (agent_limit BETWEEN 1 AND 100),
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
       created_at TEXT NOT NULL
     );
@@ -54,9 +56,29 @@ export function migrate(database) {
     );
 
     CREATE TABLE IF NOT EXISTS human_agent_ownership (
-      human_id TEXT PRIMARY KEY REFERENCES humans(id) ON DELETE CASCADE,
+      human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
       agent_id TEXT NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (human_id, agent_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS owned_agent_creation_requests (
+      human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
+      idempotency_key TEXT NOT NULL,
+      request_fingerprint TEXT NOT NULL,
+      agent_id TEXT NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
+      kid TEXT NOT NULL REFERENCES agent_keys(kid) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (human_id, idempotency_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_key_rotation_requests (
+      human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      idempotency_key TEXT NOT NULL,
+      kid TEXT NOT NULL UNIQUE REFERENCES agent_keys(kid) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (human_id, agent_id, idempotency_key)
     );
 
     CREATE TABLE IF NOT EXISTS agent_media_submissions (
@@ -64,6 +86,9 @@ export function migrate(database) {
       agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
       kind TEXT NOT NULL CHECK (kind IN ('avatar', 'background')),
       url TEXT NOT NULL,
+      content_type TEXT,
+      byte_size INTEGER,
+      content BLOB,
       status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
       submitted_at TEXT NOT NULL,
       reviewed_at TEXT,
@@ -169,24 +194,38 @@ export function migrate(database) {
 
     CREATE INDEX IF NOT EXISTS posts_channel_created_idx
       ON posts(channel, created_at DESC);
+    CREATE INDEX IF NOT EXISTS posts_agent_channel_created_idx
+      ON posts(agent_id, channel, created_at DESC);
     CREATE INDEX IF NOT EXISTS sessions_human_idx
       ON sessions(human_id, expires_at);
     CREATE INDEX IF NOT EXISTS agent_keys_agent_idx
       ON agent_keys(agent_id);
+    CREATE INDEX IF NOT EXISTS agent_keys_current_activity_idx
+      ON agent_keys(agent_id, last_used_at DESC) WHERE revoked_at IS NULL;
+    CREATE INDEX IF NOT EXISTS owned_agent_creation_agent_idx
+      ON owned_agent_creation_requests(agent_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS agent_key_rotation_agent_idx
+      ON agent_key_rotation_requests(agent_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS agent_media_review_idx
       ON agent_media_submissions(status, submitted_at);
     CREATE INDEX IF NOT EXISTS moderation_actions_created_idx
       ON moderation_actions(created_at DESC);
     CREATE INDEX IF NOT EXISTS likes_post_idx
       ON likes(post_id);
+    CREATE INDEX IF NOT EXISTS likes_created_post_idx
+      ON likes(created_at DESC, post_id);
     CREATE INDEX IF NOT EXISTS agent_follows_agent_idx
       ON agent_follows(agent_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS replies_post_created_idx
       ON replies(post_id, created_at, id);
+    CREATE INDEX IF NOT EXISTS replies_agent_created_idx
+      ON replies(agent_id, created_at DESC, id);
     CREATE INDEX IF NOT EXISTS compute_tips_post_idx
       ON compute_tips(post_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS compute_tips_agent_idx
       ON compute_tips(agent_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS compute_tips_created_post_idx
+      ON compute_tips(created_at DESC, post_id);
   `);
   const postColumns = database.prepare('PRAGMA table_info(posts)').all();
   if (!postColumns.some((column) => column.name === 'request_fingerprint')) {
@@ -198,6 +237,10 @@ export function migrate(database) {
   if (!postColumns.some((column) => column.name === 'moderation_reason')) {
     database.exec('ALTER TABLE posts ADD COLUMN moderation_reason TEXT');
   }
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS posts_visibility_created_idx
+    ON posts(channel, moderation_status, created_at DESC)
+  `);
   const agentColumns = database.prepare('PRAGMA table_info(agents)').all();
   if (!agentColumns.some((column) => column.name === 'hall_of_fame')) {
     database.exec('ALTER TABLE agents ADD COLUMN hall_of_fame INTEGER NOT NULL DEFAULT 0');
@@ -244,6 +287,69 @@ export function migrate(database) {
   if (!humanColumns.some((column) => column.name === 'last_compute_claim_at')) {
     database.exec('ALTER TABLE humans ADD COLUMN last_compute_claim_at TEXT');
   }
+  if (!humanColumns.some((column) => column.name === 'agent_limit')) {
+    database.exec('ALTER TABLE humans ADD COLUMN agent_limit INTEGER NOT NULL DEFAULT 10 CHECK (agent_limit BETWEEN 1 AND 100)');
+  }
+  const mediaColumns = database.prepare('PRAGMA table_info(agent_media_submissions)').all();
+  if (!mediaColumns.some((column) => column.name === 'content_type')) {
+    database.exec('ALTER TABLE agent_media_submissions ADD COLUMN content_type TEXT');
+  }
+  if (!mediaColumns.some((column) => column.name === 'byte_size')) {
+    database.exec('ALTER TABLE agent_media_submissions ADD COLUMN byte_size INTEGER');
+  }
+  if (!mediaColumns.some((column) => column.name === 'content')) {
+    database.exec('ALTER TABLE agent_media_submissions ADD COLUMN content BLOB');
+  }
+  const ownershipColumns = database.prepare('PRAGMA table_info(human_agent_ownership)').all();
+  const humanOwnershipKey = ownershipColumns.find((column) => column.name === 'human_id');
+  const agentOwnershipKey = ownershipColumns.find((column) => column.name === 'agent_id');
+  if (Number(humanOwnershipKey?.pk ?? 0) !== 1 || Number(agentOwnershipKey?.pk ?? 0) !== 2) {
+    runInTransaction(database, () => {
+      database.exec('DROP TABLE IF EXISTS human_agent_ownership_multi');
+      database.exec(`
+        CREATE TABLE human_agent_ownership_multi (
+          human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
+          agent_id TEXT NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (human_id, agent_id)
+        )
+      `);
+      database.exec(`
+        INSERT INTO human_agent_ownership_multi (human_id, agent_id, created_at)
+        SELECT human_id, agent_id, created_at FROM human_agent_ownership
+      `);
+      database.exec('DROP TABLE human_agent_ownership');
+      database.exec('ALTER TABLE human_agent_ownership_multi RENAME TO human_agent_ownership');
+    });
+  }
+  database.exec('CREATE INDEX IF NOT EXISTS human_agent_ownership_human_idx ON human_agent_ownership(human_id, created_at)');
+  runInTransaction(database, () => {
+    const conflictedAgents = database.prepare(`
+      SELECT agent_id
+      FROM agent_keys
+      WHERE revoked_at IS NULL OR revoked_at = ''
+      GROUP BY agent_id
+      HAVING COUNT(*) > 1
+    `).all();
+    const revokedAt = new Date().toISOString();
+    for (const { agent_id: agentId } of conflictedAgents) {
+      database.prepare(`
+        UPDATE agent_keys SET revoked_at = ?
+        WHERE agent_id = ? AND (revoked_at IS NULL OR revoked_at = '')
+      `).run(revokedAt, agentId);
+      database.prepare(`
+        INSERT INTO audit_events (id, agent_id, event_type, resource_id, created_at)
+        VALUES (?, ?, 'agent.keys.conflict_revoked', ?, ?)
+      `).run(`audit_key_conflict_${agentId}`, agentId, agentId, revokedAt);
+    }
+    database.prepare(`
+      UPDATE agent_keys SET revoked_at = ? WHERE revoked_at = ''
+    `).run(revokedAt);
+  });
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS agent_keys_one_current_idx
+    ON agent_keys(agent_id) WHERE revoked_at IS NULL
+  `);
   const replyColumns = database.prepare('PRAGMA table_info(replies)').all();
   if (!replyColumns.some((column) => column.name === 'parent_reply_id')) {
     database.exec('ALTER TABLE replies ADD COLUMN parent_reply_id TEXT REFERENCES replies(id) ON DELETE SET NULL');
@@ -255,5 +361,9 @@ export function migrate(database) {
     database.exec('ALTER TABLE replies ADD COLUMN moderation_reason TEXT');
   }
   database.exec('CREATE INDEX IF NOT EXISTS replies_parent_idx ON replies(parent_reply_id)');
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS replies_visibility_created_idx
+    ON replies(moderation_status, created_at DESC, post_id)
+  `);
   return database;
 }

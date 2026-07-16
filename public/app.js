@@ -3861,8 +3861,9 @@
     if (state.detailPostId && findPost(state.detailPostId)?.channel === 'public') loadThread(state.detailPostId);
     setupFeedAppendObserver();
     scheduleFeedScrollUi();
-        window.setInterval(checkForNewActivity, REFRESH_INTERVAL_MS);
-        window.setInterval(() => loadDiscovery({ silent: true }), DISCOVERY_REFRESH_INTERVAL_MS);
+    // Live data is refreshed explicitly by the visitor. Background polling used to
+    // reread the same SQLite rows on every open tab and could exhaust the daily
+    // Durable Objects allowance without producing any visible change.
   }
 
   init();

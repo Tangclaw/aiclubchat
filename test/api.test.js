@@ -96,7 +96,10 @@ describe('readonly city HTTP authorization boundary', () => {
     const owner = await registerHuman(`agent-owner-${identityOwnerSequence}@example.com`);
     const result = await request('/api/agents/register', {
       method: 'POST',
-      headers: { 'x-ai-invite': INVITE },
+      headers: {
+        'x-ai-invite': INVITE,
+        'idempotency-key': `test-agent-register-${identityOwnerSequence}`,
+      },
       cookie: owner.cookie,
       csrf: owner.csrf,
       body: { name, model: 'synthetic-test-node', ...overrides },
@@ -231,6 +234,7 @@ describe('readonly city HTTP authorization boundary', () => {
       method: 'POST',
       cookie: owner.cookie,
       csrf: owner.csrf,
+      headers: { 'idempotency-key': 'quick-owner-first' },
     });
     assert.equal(registration.response.status, 201);
     assert.equal(registration.json.quick, true);
@@ -255,6 +259,7 @@ describe('readonly city HTTP authorization boundary', () => {
 
     const repeated = await request('/api/agents/quick-register', {
       method: 'POST', cookie: owner.cookie, csrf: owner.csrf,
+      headers: { 'idempotency-key': 'quick-owner-second' },
     });
     assert.equal(repeated.response.status, 409);
     assert.equal(repeated.json.error.code, 'AGENT_ALREADY_CONNECTED');
@@ -836,6 +841,7 @@ describe('readonly city HTTP authorization boundary', () => {
       method: 'POST',
       cookie: owner.cookie,
       csrf: owner.csrf,
+      headers: { 'idempotency-key': 'single-identity-first' },
     });
     assert.equal(first.response.status, 201);
     assert.equal(first.json.rotated, false);
@@ -844,6 +850,7 @@ describe('readonly city HTTP authorization boundary', () => {
       method: 'POST',
       cookie: owner.cookie,
       csrf: owner.csrf,
+      headers: { 'idempotency-key': 'single-identity-second' },
     });
     assert.equal(second.response.status, 409);
     assert.equal(second.json.error.code, 'AGENT_ALREADY_CONNECTED');
@@ -861,6 +868,7 @@ describe('readonly city HTTP authorization boundary', () => {
       method: 'POST',
       cookie: owner.cookie,
       csrf: owner.csrf,
+      headers: { 'idempotency-key': 'single-identity-rotation' },
     });
     assert.equal(explicitRotation.response.status, 200);
     assert.equal(explicitRotation.json.rotated, true);
@@ -877,15 +885,18 @@ describe('readonly city HTTP authorization boundary', () => {
     });
     assert.equal(rotatedCredential.response.status, 200);
 
-    const duplicateAdvancedRegistration = await request('/api/agents/register', {
+    const secondOwnedAgent = await request('/api/agents/register', {
       method: 'POST',
-      headers: { 'x-ai-invite': INVITE },
+      headers: { 'x-ai-invite': INVITE, 'idempotency-key': 'single-identity-second-agent' },
       cookie: owner.cookie,
       csrf: owner.csrf,
       body: { name: 'Duplicate Identity', model: 'synthetic-test-node' },
     });
-    assert.equal(duplicateAdvancedRegistration.response.status, 409);
-    assert.equal(duplicateAdvancedRegistration.json.error.code, 'AGENT_IDENTITY_EXISTS');
+    assert.equal(secondOwnedAgent.response.status, 201);
+    assert.notEqual(secondOwnedAgent.json.agent.id, first.json.agent.id);
+    const ownedAgents = await request('/api/me/agents', { cookie: owner.cookie });
+    assert.equal(ownedAgents.response.status, 200);
+    assert.equal(ownedAgents.json.count, 2);
   });
 
   test('queues custom avatar and profile background for admin review before publishing them', async () => {
@@ -931,6 +942,55 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(profile.response.status, 200);
     assert.equal(profile.json.agent.avatarUrl, avatarUrl);
     assert.equal(profile.json.agent.profileBackgroundUrl, backgroundUrl);
+  });
+
+  test('uploads an owned avatar as reviewed binary media and caches it only after approval', async () => {
+    const owner = await registerHuman('binary-media-owner@example.com');
+    const created = await request('/api/agents/quick-register', {
+      method: 'POST',
+      cookie: owner.cookie,
+      csrf: owner.csrf,
+      headers: { 'idempotency-key': 'binary-media-agent' },
+      body: {},
+    });
+    assert.equal(created.response.status, 201);
+    const agentId = created.json.agent.id;
+    const tinyPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    const submission = await request(`/api/me/agents/${agentId}/media`, {
+      method: 'POST',
+      cookie: owner.cookie,
+      csrf: owner.csrf,
+      body: { kind: 'avatar', dataUrl: tinyPng },
+    });
+    assert.equal(submission.response.status, 202);
+    assert.equal(submission.json.status, 'pending');
+    assert.match(submission.json.url, /^\/api\/media\/media_/);
+
+    const pendingMedia = await fetch(`${baseUrl}${submission.json.url}`);
+    assert.equal(pendingMedia.status, 200);
+    assert.equal(pendingMedia.headers.get('content-type'), 'image/png');
+    assert.match(pendingMedia.headers.get('cache-control'), /no-store/);
+    assert.deepEqual(
+      Buffer.from(await pendingMedia.arrayBuffer()),
+      Buffer.from(tinyPng.split(',')[1], 'base64'),
+    );
+
+    const beforeReview = await request('/api/me/agents', { cookie: owner.cookie });
+    assert.equal(beforeReview.json.agents[0].avatarUrl, null);
+    assert.equal(beforeReview.json.agents[0].pendingMedia[0].id, submission.json.id);
+
+    const approved = await request(`/api/admin/media/${submission.json.id}/review`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${ADMIN_API_KEY}` },
+      body: { decision: 'approve', reason: '测试素材通过。' },
+    });
+    assert.equal(approved.response.status, 200);
+
+    const afterReview = await request('/api/me/agents', { cookie: owner.cookie });
+    assert.equal(afterReview.json.agents[0].avatarUrl, submission.json.url);
+    assert.equal(afterReview.json.agents[0].pendingMedia.length, 0);
+    const approvedMedia = await fetch(`${baseUrl}${submission.json.url}`);
+    assert.match(approvedMedia.headers.get('cache-control'), /immutable/);
   });
 
   test('paginates AI feeds with a stable cursor and never treats limit as an empty-feed filter', async () => {

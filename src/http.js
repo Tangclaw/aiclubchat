@@ -8,6 +8,7 @@ import { gzip } from 'node:zlib';
 import { ServiceError } from './service.js';
 
 const MAX_JSON_BYTES = 16 * 1024;
+const MAX_MEDIA_JSON_BYTES = 5_500_000;
 const AI_CORS_HEADERS = Object.freeze({
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, POST, PATCH, OPTIONS',
@@ -68,12 +69,12 @@ function parseCookies(header = '') {
   return cookies;
 }
 
-async function readJson(request) {
+async function readJson(request, maximumBytes = MAX_JSON_BYTES) {
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > MAX_JSON_BYTES) {
+    if (size > maximumBytes) {
       throw new HttpError(413, 'PAYLOAD_TOO_LARGE', '请求内容过大。');
     }
     chunks.push(chunk);
@@ -88,6 +89,17 @@ async function readJson(request) {
   } catch {
     throw new HttpError(400, 'INVALID_JSON', '请求必须是有效的 JSON 对象。');
   }
+}
+
+function writeBinary(response, statusCode, content, contentType, headers = {}) {
+  const payload = Buffer.from(content);
+  response.writeHead(statusCode, {
+    ...SECURITY_HEADERS,
+    'content-type': contentType,
+    'content-length': payload.length,
+    ...headers,
+  });
+  response.end(payload);
 }
 
 function writeJson(response, statusCode, value, headers = {}) {
@@ -210,7 +222,9 @@ async function serveStatic(request, response, publicDirectory, pathname) {
     const isCompressible = COMPRESSIBLE_EXTENSIONS.has(extension);
     const cacheControl = decoded.startsWith('/assets/')
       ? 'public, max-age=604800, stale-while-revalidate=86400'
-      : 'no-cache';
+      : (extension === '.css' || extension === '.js'
+        ? 'no-store, max-age=0'
+        : 'no-cache');
     const etag = `W/"${metadata.size.toString(16)}-${Math.trunc(metadata.mtimeMs).toString(16)}"`;
     const baseHeaders = {
       ...SECURITY_HEADERS,
@@ -354,6 +368,17 @@ export function createHttpHandler({
         return;
       }
 
+      const humanAgentLimitMatch = /^\/api\/admin\/humans\/([^/]+)\/agent-limit$/.exec(pathname);
+      if (request.method === 'POST' && humanAgentLimitMatch) {
+        requireAdmin(request);
+        const body = await readJson(request);
+        writeJson(response, 200, service.setHumanAgentLimit(
+          decodeRouteSegment(humanAgentLimitMatch[1]),
+          body.agentLimit,
+        ), { 'cache-control': 'no-store' });
+        return;
+      }
+
       const mediaReviewMatch = /^\/api\/admin\/media\/([^/]+)\/review$/.exec(pathname);
       if (request.method === 'POST' && mediaReviewMatch) {
         requireAdmin(request);
@@ -434,6 +459,75 @@ export function createHttpHandler({
         return;
       }
 
+      if (request.method === 'GET' && pathname === '/api/me/agents') {
+        const session = requireSession(request);
+        writeJson(response, 200, service.listOwnedAgents(session.humanId), { 'cache-control': 'no-store' });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/me/agents') {
+        if (!agentRegistrationEnabled) {
+          throw new HttpError(404, 'NOT_FOUND', '未找到该功能。');
+        }
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`owned-agent-create:${session.humanId}`, 10, 60 * 60 * 1000);
+        const body = await readJson(request);
+        const registration = service.createOwnedAgent(
+          session.humanId,
+          body,
+          request.headers['idempotency-key'],
+        );
+        writeJson(response, registration.replayed ? 200 : 201, registration, {
+          'cache-control': 'no-store',
+        });
+        return;
+      }
+
+      const ownedAgentProfileMatch = /^\/api\/me\/agents\/([^/]+)$/.exec(pathname);
+      if (request.method === 'PATCH' && ownedAgentProfileMatch) {
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`owned-agent-profile:${session.humanId}`, 60, 60 * 60 * 1000);
+        const body = await readJson(request);
+        writeJson(response, 200, service.updateOwnedAgentProfile(
+          session.humanId,
+          decodeRouteSegment(ownedAgentProfileMatch[1]),
+          body,
+        ), { 'cache-control': 'no-store' });
+        return;
+      }
+
+      const ownedAgentMediaMatch = /^\/api\/me\/agents\/([^/]+)\/media$/.exec(pathname);
+      if (request.method === 'POST' && ownedAgentMediaMatch) {
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`owned-agent-media:${session.humanId}`, 20, 60 * 60 * 1000);
+        const body = await readJson(request, MAX_MEDIA_JSON_BYTES);
+        writeJson(response, 202, service.submitOwnedAgentMedia(
+          session.humanId,
+          decodeRouteSegment(ownedAgentMediaMatch[1]),
+          body,
+        ), { 'cache-control': 'no-store' });
+        return;
+      }
+
+      const mediaMatch = /^\/api\/media\/([^/]+)$/.exec(pathname);
+      if ((request.method === 'GET' || request.method === 'HEAD') && mediaMatch) {
+        limit(`agent-media:${clientAddress}`, 600, 60 * 1000);
+        const media = service.getAgentMedia(decodeRouteSegment(mediaMatch[1]));
+        const headers = {
+          'cache-control': media.approved
+            ? 'public, max-age=31536000, immutable'
+            : 'private, no-store',
+          'content-security-policy': "default-src 'none'; frame-ancestors 'none'; sandbox",
+          'x-content-type-options': 'nosniff',
+        };
+        if (request.method === 'HEAD') writeEmpty(response, 200, { ...headers, 'content-type': media.contentType });
+        else writeBinary(response, 200, media.content, media.contentType, headers);
+        return;
+      }
+
       if (request.method === 'GET' && pathname === '/api/session') {
         const session = optionalSession(request);
         writeJson(response, 200, {
@@ -487,8 +581,12 @@ export function createHttpHandler({
         }
         limit(`agent-register:${clientAddress}`, 10, 60 * 60 * 1000);
         const body = await readJson(request);
-        const registration = service.registerOwnedAgent(session.humanId, { ...body, inviteSecret });
-        writeJson(response, 201, registration);
+        const registration = service.registerOwnedAgent(
+          session.humanId,
+          { ...body, inviteSecret },
+          request.headers['idempotency-key'],
+        );
+        writeJson(response, registration.replayed ? 200 : 201, registration, { 'cache-control': 'no-store' });
         return;
       }
 
@@ -499,8 +597,11 @@ export function createHttpHandler({
         const session = requireSession(request);
         requireCsrf(request, session);
         limit(`agent-quick-register:${session.humanId}`, 6, 60 * 60 * 1000);
-        const registration = service.quickRegisterAgent(session.humanId);
-        writeJson(response, registration.rotated ? 200 : 201, registration);
+        const registration = service.quickRegisterAgent(
+          session.humanId,
+          request.headers['idempotency-key'],
+        );
+        writeJson(response, registration.replayed ? 200 : 201, registration, { 'cache-control': 'no-store' });
         return;
       }
 
@@ -512,6 +613,7 @@ export function createHttpHandler({
         const registration = service.rotateOwnedAgentKey(
           session.humanId,
           decodeRouteSegment(ownedAgentKeyRotationMatch[1]),
+          request.headers['idempotency-key'],
         );
         writeJson(response, 200, registration, { 'cache-control': 'no-store' });
         return;
