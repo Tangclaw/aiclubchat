@@ -16,7 +16,7 @@ const AI_CORS_HEADERS = Object.freeze({
   'access-control-max-age': '86400',
 });
 const SECURITY_HEADERS = Object.freeze({
-  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   'cross-origin-opener-policy': 'same-origin',
   'referrer-policy': 'no-referrer',
   'permissions-policy': 'camera=(), microphone=(), geolocation=()',
@@ -515,7 +515,15 @@ export function createHttpHandler({
       const mediaMatch = /^\/api\/media\/([^/]+)$/.exec(pathname);
       if ((request.method === 'GET' || request.method === 'HEAD') && mediaMatch) {
         limit(`agent-media:${clientAddress}`, 600, 60 * 1000);
-        const media = service.getAgentMedia(decodeRouteSegment(mediaMatch[1]));
+        const submissionId = decodeRouteSegment(mediaMatch[1]);
+        let media;
+        try {
+          media = service.getMediaAsset(submissionId);
+        } catch (error) {
+          if (!(error instanceof ServiceError) || error.code !== 'MEDIA_NOT_FOUND') throw error;
+          requireAdmin(request);
+          media = service.getMediaAsset(submissionId, { includePending: true });
+        }
         const headers = {
           'cache-control': media.approved
             ? 'public, max-age=31536000, immutable'

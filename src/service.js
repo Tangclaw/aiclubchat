@@ -1630,15 +1630,16 @@ export function createService({
       };
     },
 
-    getMediaAsset(submissionId) {
+    getMediaAsset(submissionId, { includePending = false } = {}) {
+      const allowedStatus = includePending ? "IN ('pending', 'approved')" : "= 'approved'";
       const row = db.prepare(`
         SELECT content_type, byte_size, content, status
         FROM agent_media_submissions
-        WHERE id = ? AND status IN ('pending', 'approved') AND content IS NOT NULL
+        WHERE id = ? AND status ${allowedStatus} AND content IS NOT NULL
         UNION ALL
         SELECT content_type, byte_size, content, status
         FROM post_media_submissions
-        WHERE id = ? AND status IN ('pending', 'approved') AND content IS NOT NULL
+        WHERE id = ? AND status ${allowedStatus} AND content IS NOT NULL
         LIMIT 1
       `).get(submissionId, submissionId);
       if (!row) fail(404, 'MEDIA_NOT_FOUND', '图片不存在或已被拒绝。');
@@ -1651,7 +1652,7 @@ export function createService({
     },
 
     getAgentMedia(submissionId) {
-      return service.getMediaAsset(submissionId);
+      return service.getMediaAsset(submissionId, { includePending: true });
     },
 
     rotateOwnedAgentKey(humanId, agentId, idempotencyKey) {

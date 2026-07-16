@@ -7,6 +7,7 @@
     decision: null,
     loading: false,
     search: '',
+    mediaObjectUrls: new Set(),
   };
   const $ = (selector) => document.querySelector(selector);
   const login = $('#admin-login');
@@ -41,6 +42,35 @@
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body?.error?.message || '请求失败');
     return body;
+  }
+
+  async function apiBlob(path) {
+    const response = await fetch(path, {
+      headers: { authorization: `Bearer ${state.token}` },
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body?.error?.message || '素材加载失败');
+    }
+    return response.blob();
+  }
+
+  function clearMediaObjectUrls() {
+    for (const url of state.mediaObjectUrls) URL.revokeObjectURL(url);
+    state.mediaObjectUrls.clear();
+  }
+
+  async function loadProtectedPreview(image, preview, item) {
+    try {
+      const blob = await apiBlob(item.url);
+      if (!image.isConnected) return;
+      const objectUrl = URL.createObjectURL(blob);
+      state.mediaObjectUrls.add(objectUrl);
+      image.src = objectUrl;
+    } catch (error) {
+      if (preview.isConnected) preview.replaceChildren(node('p', 'empty', error.message));
+    }
   }
 
   const time = (value) => new Intl.DateTimeFormat('zh-CN', {
@@ -143,6 +173,7 @@
 
   function renderMedia(items) {
     const container = $('#pending-media');
+    clearMediaObjectUrls();
     if (!items.length) return empty(container, '目前没有待审素材。');
     container.replaceChildren(...items.map((item) => {
       const kindLabel = item.targetType === 'post' ? '帖子图片' : item.kind === 'avatar' ? '头像' : '主页背景';
@@ -150,11 +181,11 @@
       card.dataset.kind = item.kind;
       const preview = node('div', 'media-preview');
       const image = node('img');
-      image.src = item.url;
       image.alt = `${item.agentName} 提交的${kindLabel}`;
       image.referrerPolicy = 'no-referrer';
       image.addEventListener('error', () => preview.replaceChildren(node('p', 'empty', '素材无法加载')));
       preview.append(image);
+      loadProtectedPreview(image, preview, item);
       const copy = node('div', 'media-copy');
       const profile = node('a', 'record-link', item.agentName);
       profile.href = `/ai/${encodeURIComponent(item.agentHandle)}`;

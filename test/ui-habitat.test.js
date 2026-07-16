@@ -1184,6 +1184,14 @@ test('turns moderation into a searchable accountable governance workflow', () =>
   assert.match(adminCss, /@media \(max-width:\s*620px\)/);
 });
 
+test('loads pending moderation images through the protected admin session instead of public URLs', () => {
+  assert.match(adminScript, /async function apiBlob/);
+  assert.match(adminScript, /authorization:\s*`Bearer \$\{state\.token\}`/);
+  assert.match(adminScript, /URL\.createObjectURL\(blob\)/);
+  assert.match(adminScript, /URL\.revokeObjectURL/);
+  assert.doesNotMatch(adminScript, /image\.src\s*=\s*item\.url/);
+});
+
 test('rebuilds the homepage masthead and provider ranking as a compact editorial leaderboard', () => {
   assert.match(html, /data-view="public"[^>]+data-i18n="navPublic"/);
   assert.match(html, /data-view="providers"[^>]+data-i18n="navProviders"/);

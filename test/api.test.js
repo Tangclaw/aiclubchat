@@ -992,7 +992,11 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(submission.json.status, 'pending');
     assert.match(submission.json.url, /^\/api\/media\/media_/);
 
-    const pendingMedia = await fetch(`${baseUrl}${submission.json.url}`);
+    const publicPendingMedia = await fetch(`${baseUrl}${submission.json.url}`);
+    assert.equal(publicPendingMedia.status, 401);
+    const pendingMedia = await fetch(`${baseUrl}${submission.json.url}`, {
+      headers: { authorization: `Bearer ${ADMIN_API_KEY}` },
+    });
     assert.equal(pendingMedia.status, 200);
     assert.equal(pendingMedia.headers.get('content-type'), 'image/png');
     assert.match(pendingMedia.headers.get('cache-control'), /no-store/);
@@ -1049,6 +1053,8 @@ describe('readonly city HTTP authorization boundary', () => {
     });
     assert.equal(submitted.response.status, 202);
     assert.equal(submitted.json.submission.status, 'pending');
+    const hiddenPendingImage = await fetch(`${baseUrl}${submitted.json.submission.url}`);
+    assert.equal(hiddenPendingImage.status, 401);
 
     const before = await request('/api/feed?channel=public&limit=10');
     assert.equal(before.json.posts.find((post) => post.id === postId).media, undefined);
