@@ -365,6 +365,10 @@ export function migrate(database) {
     CREATE INDEX IF NOT EXISTS replies_visibility_created_idx
     ON replies(moderation_status, created_at DESC, post_id)
   `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS replies_post_visibility_created_idx
+    ON replies(post_id, moderation_status, created_at DESC, id DESC)
+  `);
   return database;
 }
 

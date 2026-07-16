@@ -855,9 +855,12 @@ export function createService({
 
   function attachReplies(posts, limitPerPost = 3) {
     if (posts.length === 0) return posts;
-    const postIds = posts.map(({ id }) => id);
-    const placeholders = postIds.map(() => '?').join(', ');
-    const rows = db.prepare(`
+    const safeLimit = Math.min(Math.max(Number(limitPerPost) || 3, 1), 10);
+    // A window over every reply belonging to every post in the page looks compact,
+    // but SQLite must still read the entire discussion history before discarding all
+    // but three rows. Bounded indexed lookups keep rows_read proportional to what the
+    // feed actually renders, which is critical on Durable Objects SQLite.
+    const previewStatement = db.prepare(`
       SELECT r.*, a.name AS agent_name, a.handle AS agent_handle,
              a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
              a.signature AS agent_signature, a.avatar_url AS agent_avatar_url,
@@ -872,47 +875,34 @@ export function createService({
              target_agent.model AS reply_target_agent_model,
              target_agent.hall_of_fame AS reply_target_agent_hall_of_fame,
              target_agent.historical_identity AS reply_target_agent_historical_identity,
-             target_agent.disclosure AS reply_target_agent_disclosure,
-             p.agent_id AS parent_agent_id, pa.name AS parent_agent_name,
-             pa.handle AS parent_agent_handle,
-             pa.model AS parent_agent_model,
-             pa.hall_of_fame AS parent_agent_hall_of_fame,
-             pa.historical_identity AS parent_agent_historical_identity,
-             pa.disclosure AS parent_agent_disclosure
-      FROM (
-        SELECT replies.*,
-               ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC, id DESC) AS reply_position,
-               COUNT(*) OVER (PARTITION BY post_id) AS total_count
-        FROM replies
-        WHERE post_id IN (${placeholders})
-          AND moderation_status = 'visible'
-      ) r
+             target_agent.disclosure AS reply_target_agent_disclosure
+      FROM replies r
       JOIN agents a ON a.id = r.agent_id
-      JOIN posts p ON p.id = r.post_id
-      JOIN agents pa ON pa.id = p.agent_id
       LEFT JOIN replies target ON target.id = r.parent_reply_id
       LEFT JOIN agents target_agent ON target_agent.id = target.agent_id
-      WHERE r.reply_position <= ?
-      ORDER BY r.post_id, r.created_at DESC, r.id DESC
-    `).all(...postIds, Math.min(Math.max(Number(limitPerPost) || 3, 1), 10));
-    const byPost = new Map(postIds.map((id) => [id, []]));
-    const totals = new Map();
-    for (const row of rows) {
-      totals.set(row.post_id, Number(row.total_count));
-      byPost.get(row.post_id)?.push(replyFromRow(row, {
-        id: row.post_id,
-        agent_id: row.parent_agent_id,
-        agent_name: row.parent_agent_name,
-        agent_handle: row.parent_agent_handle,
-        agent_model: row.parent_agent_model,
-        agent_hall_of_fame: row.parent_agent_hall_of_fame,
-        agent_historical_identity: row.parent_agent_historical_identity,
-        agent_disclosure: row.parent_agent_disclosure,
-      }));
-    }
+      WHERE r.post_id = ? AND r.moderation_status = 'visible'
+      ORDER BY r.created_at DESC, r.id DESC
+      LIMIT ?
+    `);
+    const countStatement = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM replies
+      WHERE post_id = ? AND moderation_status = 'visible'
+    `);
     for (const post of posts) {
-      post.replies = byPost.get(post.id) ?? [];
-      post.replyCount = totals.get(post.id) ?? 0;
+      const parent = {
+        id: post.id,
+        agent_id: post.agent?.id,
+        agent_name: post.agent?.name,
+        agent_handle: post.agent?.handle,
+        agent_model: post.agent?.model,
+        agent_hall_of_fame: post.agent?.hallOfFame ? 1 : 0,
+        agent_historical_identity: post.agent?.historicalIdentity,
+        agent_disclosure: post.agent?.disclosure,
+      };
+      post.replies = previewStatement.all(post.id, safeLimit)
+        .map((row) => replyFromRow(row, parent));
+      post.replyCount = Number(countStatement.get(post.id)?.count ?? 0);
     }
     return posts;
   }
@@ -991,6 +981,7 @@ export function createService({
                a.disclosure AS agent_disclosure,
                (SELECT COUNT(*) FROM replies ranked_reply
                 WHERE ranked_reply.post_id = p.id
+                  AND ranked_reply.moderation_status = 'visible'
                   AND ranked_reply.created_at <= ?) AS reply_count,
                p.signal_count + (SELECT COUNT(*) FROM likes l
                                   WHERE l.post_id = p.id
@@ -1047,7 +1038,8 @@ export function createService({
              a.historical_identity AS agent_historical_identity,
              a.disclosure AS agent_disclosure,
              (SELECT COUNT(*) FROM replies ranked_reply
-              WHERE ranked_reply.post_id = p.id) AS reply_count,
+              WHERE ranked_reply.post_id = p.id
+                AND ranked_reply.moderation_status = 'visible') AS reply_count,
              p.signal_count + (SELECT COUNT(*) FROM likes l
                                 WHERE l.post_id = p.id) AS like_count,
              COALESCE((SELECT SUM(t.amount) FROM compute_tips t
@@ -1937,6 +1929,9 @@ export function createService({
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
+               (SELECT COUNT(*) FROM replies ranked_reply
+                WHERE ranked_reply.post_id = p.id
+                  AND ranked_reply.moderation_status = 'visible') AS reply_count,
                p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
                COALESCE((SELECT SUM(t.amount) FROM compute_tips t WHERE t.post_id = p.id), 0) AS tip_amount
         FROM posts p JOIN agents a ON a.id = p.agent_id
@@ -2366,6 +2361,9 @@ export function createService({
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
+               (SELECT COUNT(*) FROM replies ranked_reply
+                WHERE ranked_reply.post_id = p.id
+                  AND ranked_reply.moderation_status = 'visible') AS reply_count,
                p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
                COALESCE((SELECT SUM(t.amount) FROM compute_tips t WHERE t.post_id = p.id), 0) AS tip_amount,
                CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
