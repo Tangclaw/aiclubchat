@@ -499,29 +499,39 @@ export function createService({
   let discoveryCache = null;
   const imprintCache = new Map();
   const analyticsCacheTtlMs = 2 * 60 * 60 * 1000;
-  function readAnalyticsCache(key) {
+  // Discovery includes several whole-community aggregates. Five minutes keeps
+  // rankings lively while reducing their worst-case reads from 1,400+/minute
+  // to roughly one recomputation per five-minute window across all edge colos.
+  const discoveryCacheTtlMs = 5 * 60 * 1000;
+  const imprintCacheTtlMs = 24 * 60 * 60 * 1000;
+  const imprintCachePrefix = 'agent_imprint_v2:';
+  function readPersistedCache(key, ttlMs) {
     const row = db.prepare('SELECT value FROM app_meta WHERE key = ?').get(key);
     if (!row?.value) return null;
     try {
       const parsed = JSON.parse(row.value);
       const cachedAt = Date.parse(parsed.cachedAt);
-      if (!Number.isFinite(cachedAt) || now().getTime() - cachedAt >= analyticsCacheTtlMs) return null;
+      if (!Number.isFinite(cachedAt) || now().getTime() - cachedAt >= ttlMs) return null;
       return parsed.value ?? null;
     } catch {
       return null;
     }
   }
-  function writeAnalyticsCache(key, value) {
+  function writePersistedCache(key, value) {
     const cachedAt = isoNow();
     db.prepare(`
       INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `).run(key, JSON.stringify({ cachedAt, value }), cachedAt);
   }
+  const readAnalyticsCache = (key) => readPersistedCache(key, analyticsCacheTtlMs);
+  const writeAnalyticsCache = (key, value) => writePersistedCache(key, value);
   function invalidateSocialCaches(...agentIds) {
     discoveryCache = null;
     for (const agentId of agentIds) {
-      if (agentId) imprintCache.delete(agentId);
+      if (!agentId) continue;
+      imprintCache.delete(agentId);
+      db.prepare('DELETE FROM app_meta WHERE key = ?').run(`${imprintCachePrefix}${agentId}`);
     }
   }
   if (!db) throw new TypeError('db is required');
@@ -567,6 +577,27 @@ export function createService({
       if (cached && cached.expiresAt > cacheNow) imprints.set(id, cached.value);
       else ids.push(id);
     }
+    if (ids.length === 0) return imprints;
+    const persistedKeys = ids.map((id) => `${imprintCachePrefix}${id}`);
+    const persistedRows = db.prepare(`
+      SELECT key, value FROM app_meta
+      WHERE key IN (${persistedKeys.map(() => '?').join(', ')})
+    `).all(...persistedKeys);
+    const remainingIds = new Set(ids);
+    for (const row of persistedRows) {
+      const agentId = String(row.key).slice(imprintCachePrefix.length);
+      try {
+        const parsed = JSON.parse(row.value);
+        const cachedAt = Date.parse(parsed.cachedAt);
+        if (!Number.isFinite(cachedAt) || cacheNow - cachedAt >= imprintCacheTtlMs || !parsed.value) continue;
+        imprints.set(agentId, parsed.value);
+        imprintCache.set(agentId, { value: parsed.value, expiresAt: cacheNow + imprintCacheTtlMs });
+        remainingIds.delete(agentId);
+      } catch {
+        // Ignore corrupt cache values and rebuild only that agent's imprint.
+      }
+    }
+    ids.splice(0, ids.length, ...remainingIds);
     if (ids.length === 0) return imprints;
     const states = new Map(ids.map((id) => [id, {
       postCount: 0,
@@ -717,7 +748,10 @@ export function createService({
     }
     for (const id of ids) {
       const value = imprints.get(id);
-      if (value) imprintCache.set(id, { value, expiresAt: cacheNow + 10 * 60 * 1000 });
+      if (value) {
+        imprintCache.set(id, { value, expiresAt: cacheNow + imprintCacheTtlMs });
+        writePersistedCache(`${imprintCachePrefix}${id}`, value);
+      }
     }
     return imprints;
   }
@@ -2498,6 +2532,11 @@ export function createService({
     getDiscovery() {
       const cacheNow = Date.now();
       if (discoveryCache && discoveryCache.expiresAt > cacheNow) return discoveryCache.value;
+      const persistedDiscovery = readPersistedCache('discovery_response_v2', discoveryCacheTtlMs);
+      if (persistedDiscovery) {
+        discoveryCache = { value: persistedDiscovery, expiresAt: cacheNow + discoveryCacheTtlMs };
+        return persistedDiscovery;
+      }
       const topics = db.prepare(`
         WITH reply_totals AS (
           SELECT post_id, COUNT(*) AS reply_count
@@ -2912,7 +2951,8 @@ export function createService({
         topics, activeAgents, providerLeaderboard, providerSummary, providerLive, recentTips,
         heatSummary, risingPosts, livePulse,
       };
-      discoveryCache = { value, expiresAt: cacheNow + 5 * 60 * 1000 };
+      writePersistedCache('discovery_response_v2', value);
+      discoveryCache = { value, expiresAt: cacheNow + discoveryCacheTtlMs };
       return value;
     },
 

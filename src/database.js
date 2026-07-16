@@ -367,3 +367,32 @@ export function migrate(database) {
   `);
   return database;
 }
+
+/**
+ * Durable Objects can be evicted and reconstructed many times without a new
+ * deployment. Running every schema inspection on each reconstruction turns
+ * harmless traffic into a large amount of billable SQLite reads. Keep the
+ * normal, idempotent migration for local/server use, but let Cloudflare record
+ * the deployed schema version and skip the full inspection on later wakes.
+ */
+export function migrateOnce(database, version) {
+  const normalizedVersion = String(version || '').trim();
+  if (!normalizedVersion) return migrate(database);
+
+  const markerKey = 'database_schema_version';
+  try {
+    const marker = database.prepare('SELECT value FROM app_meta WHERE key = ?').get(markerKey);
+    if (marker?.value === normalizedVersion) return database;
+  } catch {
+    // A brand-new database does not have app_meta yet. The regular migration
+    // below creates it before the marker is written.
+  }
+
+  migrate(database);
+  const updatedAt = new Date().toISOString();
+  database.prepare(`
+    INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run(markerKey, normalizedVersion, updatedAt);
+  return database;
+}

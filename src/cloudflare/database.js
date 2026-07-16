@@ -2,27 +2,42 @@ function bindParameters(parameters) {
   return parameters.map((value) => value === undefined ? null : value);
 }
 
-export function createDurableDatabase(storage) {
+export function createDurableDatabase(storage, { onQuery } = {}) {
   const sql = storage.sql;
+  const usage = { rowsRead: 0, rowsWritten: 0, queries: 0 };
+
+  function consume(cursor, statement) {
+    const rows = cursor.toArray();
+    const sample = {
+      statement,
+      rowsRead: Number(cursor.rowsRead || 0),
+      rowsWritten: Number(cursor.rowsWritten || 0),
+    };
+    usage.rowsRead += sample.rowsRead;
+    usage.rowsWritten += sample.rowsWritten;
+    usage.queries += 1;
+    onQuery?.(sample);
+    return rows;
+  }
 
   return {
     isOpen: true,
     exec(statement) {
       const cursor = sql.exec(statement);
-      cursor.toArray();
+      consume(cursor, statement);
       return this;
     },
     prepare(statement) {
       return {
         all(...parameters) {
-          return sql.exec(statement, ...bindParameters(parameters)).toArray();
+          return consume(sql.exec(statement, ...bindParameters(parameters)), statement);
         },
         get(...parameters) {
-          return sql.exec(statement, ...bindParameters(parameters)).toArray()[0];
+          return consume(sql.exec(statement, ...bindParameters(parameters)), statement)[0];
         },
         run(...parameters) {
           const cursor = sql.exec(statement, ...bindParameters(parameters));
-          cursor.toArray();
+          consume(cursor, statement);
           return {
             changes: cursor.rowsWritten,
             lastInsertRowid: 0,
@@ -32,6 +47,9 @@ export function createDurableDatabase(storage) {
     },
     transaction(action) {
       return storage.transactionSync(action);
+    },
+    usage() {
+      return { ...usage };
     },
     close() {},
   };

@@ -2,10 +2,11 @@ import { DurableObject } from 'cloudflare:workers';
 import { httpServerHandler } from 'cloudflare:node';
 import { createServer } from 'node:http';
 
-import { migrate } from '../database.js';
+import { migrateOnce } from '../database.js';
 import { createHttpHandler } from '../http.js';
 import { seedWorld } from '../seed.js';
 import { createService } from '../service.js';
+import { fetchPublicApi } from './cache.js';
 import { createDurableDatabase } from './database.js';
 
 const STATE_NAME = 'aiclub-production';
@@ -35,7 +36,18 @@ export class AIClubState extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
 
-    const database = migrate(createDurableDatabase(ctx.storage));
+    const database = migrateOnce(createDurableDatabase(ctx.storage, {
+      onQuery({ statement, rowsRead, rowsWritten }) {
+        if (rowsRead < 250) return;
+        console.warn(JSON.stringify({
+          event: 'database.query.high_read',
+          rowsRead,
+          rowsWritten,
+          query: String(statement).replace(/\s+/g, ' ').trim().slice(0, 180),
+        }));
+      },
+    }), env.DATABASE_SCHEMA_VERSION);
+    this.database = database;
     const service = createService({
       db: database,
       encryptionKey: encryptionKey(env.MESSAGE_ENCRYPTION_KEY),
@@ -61,20 +73,45 @@ export class AIClubState extends DurableObject {
     this.nodeHandler = httpServerHandler(server);
   }
 
-  fetch(request) {
-    return this.nodeHandler.fetch(request);
+  async fetch(request) {
+    const before = this.database?.usage?.() ?? null;
+    const response = await this.nodeHandler.fetch(request);
+    const after = this.database?.usage?.() ?? null;
+    if (before && after) {
+      const rowsRead = after.rowsRead - before.rowsRead;
+      if (rowsRead >= 100) {
+        console.warn(JSON.stringify({
+          event: 'database.request.high_read',
+          method: request.method,
+          path: new URL(request.url).pathname,
+          rowsRead,
+          rowsWritten: after.rowsWritten - before.rowsWritten,
+          queries: after.queries - before.queries,
+        }));
+      }
+    }
+    return response;
   }
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.protocol === 'http:') {
       url.protocol = 'https:';
       return Response.redirect(url, 308);
     }
     if (url.pathname === '/healthz' || url.pathname.startsWith('/api/')) {
-      return env.AICLUB_STATE.getByName(STATE_NAME).fetch(request);
+      const fetchUpstream = () => env.AICLUB_STATE.getByName(STATE_NAME).fetch(request);
+      if (url.pathname.startsWith('/api/')) {
+        return fetchPublicApi({
+          request,
+          cache: caches.default,
+          waitUntil: (promise) => ctx.waitUntil(promise),
+          fetchUpstream,
+        });
+      }
+      return fetchUpstream();
     }
 
     const rewrittenPath = assetPath(url.pathname);

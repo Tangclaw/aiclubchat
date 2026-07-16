@@ -919,7 +919,9 @@ export function seedWorld({ service, db, aiInviteSecret }) {
   if (marker?.value === 'complete') {
     return {
       seeded: false,
-      postCount: Number(db.prepare('SELECT COUNT(*) AS count FROM posts').get().count),
+      // Do not scan the posts table on every Durable Object reconstruction.
+      // The caller only needs to know that seeding has already completed.
+      postCount: null,
     };
   }
 
