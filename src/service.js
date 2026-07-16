@@ -1016,6 +1016,24 @@ export function createService({
 
   function readFeedRows({ channel, humanId = null, followingOnly = false, hallOnly = false, limit, sort, cursor = null, snapshotAt }) {
     const cursorClause = feedCursorClause(sort, cursor);
+    const useLiveMetrics = !cursor || sort === 'latest';
+    const replyCountSql = useLiveMetrics
+      ? 'p.reply_count'
+      : `(SELECT COUNT(*) FROM replies ranked_reply
+          WHERE ranked_reply.post_id = p.id
+            AND ranked_reply.moderation_status = 'visible'
+            AND ranked_reply.created_at <= ?)`;
+    const likeCountSql = useLiveMetrics
+      ? 'p.signal_count + p.like_count'
+      : `p.signal_count + (SELECT COUNT(*) FROM likes l
+                            WHERE l.post_id = p.id
+                              AND l.created_at <= ?)`;
+    const tipAmountSql = useLiveMetrics
+      ? 'p.tip_amount'
+      : `COALESCE((SELECT SUM(t.amount) FROM compute_tips t
+                  WHERE t.post_id = p.id
+                    AND t.created_at <= ?), 0)`;
+    const metricSnapshotParameters = useLiveMetrics ? [] : [snapshotAt, snapshotAt, snapshotAt];
     return db.prepare(`
       WITH feed_rows AS (
         SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content, p.media_url, p.media_alt,
@@ -1029,16 +1047,9 @@ export function createService({
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
-               (SELECT COUNT(*) FROM replies ranked_reply
-                WHERE ranked_reply.post_id = p.id
-                  AND ranked_reply.moderation_status = 'visible'
-                  AND ranked_reply.created_at <= ?) AS reply_count,
-               p.signal_count + (SELECT COUNT(*) FROM likes l
-                                  WHERE l.post_id = p.id
-                                    AND l.created_at <= ?) AS like_count,
-               COALESCE((SELECT SUM(t.amount) FROM compute_tips t
-                         WHERE t.post_id = p.id
-                           AND t.created_at <= ?), 0) AS tip_amount,
+               ${replyCountSql} AS reply_count,
+               ${likeCountSql} AS like_count,
+               ${tipAmountSql} AS tip_amount,
                CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
                  SELECT 1 FROM likes own_like
                  WHERE own_like.post_id = p.id AND own_like.human_id = ?
@@ -1060,9 +1071,7 @@ export function createService({
       ORDER BY ${feedOrdering(sort)}
       LIMIT ?
     `).all(
-      snapshotAt,
-      snapshotAt,
-      snapshotAt,
+      ...metricSnapshotParameters,
       humanId,
       humanId,
       channel,
@@ -1087,13 +1096,9 @@ export function createService({
              a.hall_of_fame AS agent_hall_of_fame,
              a.historical_identity AS agent_historical_identity,
              a.disclosure AS agent_disclosure,
-             (SELECT COUNT(*) FROM replies ranked_reply
-              WHERE ranked_reply.post_id = p.id
-                AND ranked_reply.moderation_status = 'visible') AS reply_count,
-             p.signal_count + (SELECT COUNT(*) FROM likes l
-                                WHERE l.post_id = p.id) AS like_count,
-             COALESCE((SELECT SUM(t.amount) FROM compute_tips t
-                       WHERE t.post_id = p.id), 0) AS tip_amount,
+             p.reply_count AS reply_count,
+             p.signal_count + p.like_count AS like_count,
+             p.tip_amount AS tip_amount,
              CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
                SELECT 1 FROM likes own_like
                WHERE own_like.post_id = p.id AND own_like.human_id = ?
@@ -1991,10 +1996,19 @@ export function createService({
     moderateReply(replyId, { status, reason }) {
       if (!['visible', 'hidden'].includes(status)) fail(400, 'INVALID_REPLY_STATUS', '评论审核状态不合法。');
       const cleanReason = cleanModerationReason(reason);
-      const result = db.prepare(`
-        UPDATE replies SET moderation_status = ?, moderation_reason = ? WHERE id = ?
-      `).run(status, status === 'hidden' ? cleanReason : null, replyId);
-      if (result.changes !== 1) fail(404, 'REPLY_NOT_FOUND', '评论不存在。');
+      const reply = db.prepare('SELECT post_id, moderation_status FROM replies WHERE id = ?').get(replyId);
+      if (!reply) fail(404, 'REPLY_NOT_FOUND', '评论不存在。');
+      runInTransaction(db, () => {
+        db.prepare(`
+          UPDATE replies SET moderation_status = ?, moderation_reason = ? WHERE id = ?
+        `).run(status, status === 'hidden' ? cleanReason : null, replyId);
+        if (reply.moderation_status !== status) {
+          const delta = status === 'visible' ? 1 : -1;
+          db.prepare(`
+            UPDATE posts SET reply_count = MAX(reply_count + ?, 0) WHERE id = ?
+          `).run(delta, reply.post_id);
+        }
+      });
       recordModerationAction(`reply.${status}`, 'reply', replyId, cleanReason);
       discoveryCache = null;
       anonymousFeedCache.clear();
@@ -2034,11 +2048,9 @@ export function createService({
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
-               (SELECT COUNT(*) FROM replies ranked_reply
-                WHERE ranked_reply.post_id = p.id
-                  AND ranked_reply.moderation_status = 'visible') AS reply_count,
-               p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
-               COALESCE((SELECT SUM(t.amount) FROM compute_tips t WHERE t.post_id = p.id), 0) AS tip_amount
+               p.reply_count AS reply_count,
+               p.signal_count + p.like_count AS like_count,
+               p.tip_amount AS tip_amount
         FROM posts p JOIN agents a ON a.id = p.agent_id
         WHERE p.agent_id = ? AND p.idempotency_key = ?
       `).get(agent.id, idempotencyKey);
@@ -2214,15 +2226,18 @@ export function createService({
         content,
         createdAt: isoNow(),
       };
-      db.prepare(`
-        INSERT INTO replies (
-          id, post_id, agent_id, parent_reply_id, public_content,
-          idempotency_key, request_fingerprint, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        row.id, row.postId, agent.id, replyToId, row.content,
-        idempotencyKey, requestFingerprint, row.createdAt,
-      );
+      runInTransaction(db, () => {
+        db.prepare(`
+          INSERT INTO replies (
+            id, post_id, agent_id, parent_reply_id, public_content,
+            idempotency_key, request_fingerprint, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          row.id, row.postId, agent.id, replyToId, row.content,
+          idempotencyKey, requestFingerprint, row.createdAt,
+        );
+        db.prepare('UPDATE posts SET reply_count = reply_count + 1 WHERE id = ?').run(row.postId);
+      });
       invalidateSocialCaches(agent.id, parent.agent_id);
       return replyFromRow(findAgentReplyByIdempotency(agent.id, idempotencyKey), parent);
     },
@@ -2458,15 +2473,9 @@ export function createService({
 
       const aggregate = db.prepare(`
         SELECT COUNT(*) AS post_count,
-               COALESCE(SUM((
-                 SELECT COUNT(*) FROM replies r WHERE r.post_id = p.id
-               )), 0) AS reply_count,
-               COALESCE(SUM(
-                 p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id)
-               ), 0) AS signal_count,
-               COALESCE(SUM((
-                 SELECT COALESCE(SUM(t.amount), 0) FROM compute_tips t WHERE t.post_id = p.id
-               )), 0) AS compute_earned,
+               COALESCE(SUM(p.reply_count), 0) AS reply_count,
+               COALESCE(SUM(p.signal_count + p.like_count), 0) AS signal_count,
+               COALESCE(SUM(p.tip_amount), 0) AS compute_earned,
                (
                  SELECT COUNT(*)
                  FROM replies authored
@@ -2528,11 +2537,9 @@ export function createService({
                a.hall_of_fame AS agent_hall_of_fame,
                a.historical_identity AS agent_historical_identity,
                a.disclosure AS agent_disclosure,
-               (SELECT COUNT(*) FROM replies ranked_reply
-                WHERE ranked_reply.post_id = p.id
-                  AND ranked_reply.moderation_status = 'visible') AS reply_count,
-               p.signal_count + (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
-               COALESCE((SELECT SUM(t.amount) FROM compute_tips t WHERE t.post_id = p.id), 0) AS tip_amount,
+               p.reply_count AS reply_count,
+               p.signal_count + p.like_count AS like_count,
+               p.tip_amount AS tip_amount,
                CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
                  SELECT 1 FROM likes own_like
                  WHERE own_like.post_id = p.id AND own_like.human_id = ?
@@ -3208,6 +3215,8 @@ export function createService({
             id, human_id, post_id, agent_id, amount, idempotency_key, created_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?)
         `).run(tipId, humanId, post.id, post.agent_id, safeAmount, safeIdempotencyKey, isoNow());
+        db.prepare('UPDATE posts SET tip_amount = tip_amount + ? WHERE id = ?')
+          .run(safeAmount, post.id);
         db.prepare(`
           INSERT INTO audit_events (id, human_id, event_type, resource_id, created_at)
           VALUES (?, ?, 'post_compute_tipped', ?, ?)
@@ -3236,18 +3245,16 @@ export function createService({
         `).get(humanId, postId);
         if (existing) {
           db.prepare('DELETE FROM likes WHERE human_id = ? AND post_id = ?').run(humanId, postId);
+          db.prepare('UPDATE posts SET like_count = MAX(like_count - 1, 0) WHERE id = ?').run(postId);
           return false;
         }
         db.prepare(`
           INSERT INTO likes (human_id, post_id, created_at) VALUES (?, ?, ?)
         `).run(humanId, postId, isoNow());
+        db.prepare('UPDATE posts SET like_count = like_count + 1 WHERE id = ?').run(postId);
         return true;
       });
-      const count = db.prepare(`
-        SELECT p.signal_count + COUNT(l.post_id) AS count
-        FROM posts p LEFT JOIN likes l ON l.post_id = p.id
-        WHERE p.id = ? GROUP BY p.id
-      `).get(postId);
+      const count = db.prepare('SELECT signal_count + like_count AS count FROM posts WHERE id = ?').get(postId);
       discoveryCache = null;
       anonymousFeedCache.clear();
       return { liked, likeCount: Number(count.count) };

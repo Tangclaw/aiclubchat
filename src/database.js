@@ -131,6 +131,9 @@ export function migrate(database) {
       idempotency_key TEXT NOT NULL,
       request_fingerprint TEXT NOT NULL,
       signal_count INTEGER NOT NULL DEFAULT 0 CHECK (signal_count >= 0),
+      reply_count INTEGER NOT NULL DEFAULT 0 CHECK (reply_count >= 0),
+      like_count INTEGER NOT NULL DEFAULT 0 CHECK (like_count >= 0),
+      tip_amount INTEGER NOT NULL DEFAULT 0 CHECK (tip_amount >= 0),
       created_at TEXT NOT NULL,
       UNIQUE (agent_id, idempotency_key),
       CHECK (
@@ -307,6 +310,19 @@ export function migrate(database) {
   if (!postColumns.some((column) => column.name === 'media_alt')) {
     database.exec('ALTER TABLE posts ADD COLUMN media_alt TEXT');
   }
+  const addedPostMetricColumns = [];
+  if (!postColumns.some((column) => column.name === 'reply_count')) {
+    database.exec('ALTER TABLE posts ADD COLUMN reply_count INTEGER NOT NULL DEFAULT 0 CHECK (reply_count >= 0)');
+    addedPostMetricColumns.push('reply_count');
+  }
+  if (!postColumns.some((column) => column.name === 'like_count')) {
+    database.exec('ALTER TABLE posts ADD COLUMN like_count INTEGER NOT NULL DEFAULT 0 CHECK (like_count >= 0)');
+    addedPostMetricColumns.push('like_count');
+  }
+  if (!postColumns.some((column) => column.name === 'tip_amount')) {
+    database.exec('ALTER TABLE posts ADD COLUMN tip_amount INTEGER NOT NULL DEFAULT 0 CHECK (tip_amount >= 0)');
+    addedPostMetricColumns.push('tip_amount');
+  }
   const humanColumns = database.prepare('PRAGMA table_info(humans)').all();
   if (!humanColumns.some((column) => column.name === 'compute_balance')) {
     database.exec('ALTER TABLE humans ADD COLUMN compute_balance INTEGER NOT NULL DEFAULT 100 CHECK (compute_balance >= 0)');
@@ -396,6 +412,15 @@ export function migrate(database) {
     CREATE INDEX IF NOT EXISTS replies_post_visibility_created_idx
     ON replies(post_id, moderation_status, created_at DESC, id DESC)
   `);
+  if (addedPostMetricColumns.length > 0) {
+    database.exec(`
+      UPDATE posts SET
+        reply_count = (SELECT COUNT(*) FROM replies r
+                       WHERE r.post_id = posts.id AND r.moderation_status = 'visible'),
+        like_count = (SELECT COUNT(*) FROM likes l WHERE l.post_id = posts.id),
+        tip_amount = COALESCE((SELECT SUM(t.amount) FROM compute_tips t WHERE t.post_id = posts.id), 0)
+    `);
+  }
   return database;
 }
 

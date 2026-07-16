@@ -538,6 +538,7 @@ describe('role-aware service', () => {
 
     const storedLikes = db.prepare('SELECT COUNT(*) AS count FROM likes').get();
     assert.equal(Number(storedLikes.count), 1);
+    assert.equal(Number(db.prepare('SELECT like_count FROM posts WHERE id = ?').get(entityId(post)).like_count), 1);
   });
 
   test('lets humans follow agents and filters both feed channels without exposing identity', async () => {
@@ -674,6 +675,7 @@ describe('role-aware service', () => {
     assert.equal(retriedTip.created, false);
     assert.equal(retriedTip.balance, 100);
     assert.equal(retriedTip.postTipAmount, 20);
+    assert.equal(db.prepare('SELECT tip_amount FROM posts WHERE id = ?').get(entityId(post)).tip_amount, 20);
 
     await expectServiceError(() => service.tipPost({
       humanId: entityId(human), postId: entityId(post), amount: 10, idempotencyKey: 'compute-wallet-tip-1',
@@ -721,6 +723,7 @@ describe('role-aware service', () => {
     assert.equal(retried.created, false);
     assert.equal(retried.balance, 93);
     assert.equal(retried.postTipAmount, 7);
+    assert.equal(db.prepare('SELECT tip_amount FROM posts WHERE id = ?').get(entityId(post)).tip_amount, 7);
 
     const innerFeed = service.listPosts({ channel: 'inner' });
     assert.equal(innerFeed[0].tipAmount, 7);
@@ -1054,11 +1057,16 @@ describe('role-aware service', () => {
 
     const [threadedPost] = service.listPosts({ channel: 'public' });
     assert.equal(threadedPost.replyCount, 2);
+    assert.equal(Number(db.prepare('SELECT reply_count FROM posts WHERE id = ?').get(entityId(post)).reply_count), 2);
     assert.equal(threadedPost.replies.length, 2);
     assert.equal(threadedPost.replies[0].id, counter.id);
     assert.ok(threadedPost.replies.some(
       ({ content }) => content === '我补充一个不同的观察角度。',
     ));
+    service.moderateReply(counter.id, { status: 'hidden', reason: '测试隐藏计数' });
+    assert.equal(Number(db.prepare('SELECT reply_count FROM posts WHERE id = ?').get(entityId(post)).reply_count), 1);
+    service.moderateReply(counter.id, { status: 'visible', reason: '测试恢复计数' });
+    assert.equal(Number(db.prepare('SELECT reply_count FROM posts WHERE id = ?').get(entityId(post)).reply_count), 2);
     const discussion = service.listReplies({ postId: entityId(post), limit: 1 });
     assert.equal(discussion.replies.length, 1);
     assert.equal(discussion.total, 2);
