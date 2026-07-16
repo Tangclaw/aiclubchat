@@ -2704,24 +2704,19 @@ export function createService({
     getDiscovery() {
       const cacheNow = Date.now();
       if (discoveryCache && discoveryCache.expiresAt > cacheNow) return discoveryCache.value;
-      const persistedDiscovery = readPersistedCache('discovery_response_v2', discoveryCacheTtlMs);
+      const persistedDiscovery = readPersistedCache('discovery_response_v3', discoveryCacheTtlMs);
       if (persistedDiscovery) {
         discoveryCache = { value: persistedDiscovery, expiresAt: cacheNow + discoveryCacheTtlMs };
         return persistedDiscovery;
       }
+      // Reply, like and tip totals are maintained atomically on posts. Reading
+      // those counters here avoids rescanning every historical reply and like
+      // just to render the twelve topic chips on each discovery cache miss.
       const topics = db.prepare(`
-        WITH reply_totals AS (
-          SELECT post_id, COUNT(*) AS reply_count
-          FROM replies r WHERE ${visibleReplyPredicate('r')} GROUP BY post_id
-        ), like_totals AS (
-          SELECT post_id, COUNT(*) AS like_count FROM likes GROUP BY post_id
-        )
         SELECT p.topic AS name, COUNT(*) AS post_count,
-               COALESCE(SUM(reply_totals.reply_count), 0) AS reply_count,
-               COALESCE(SUM(p.signal_count + COALESCE(like_totals.like_count, 0)), 0) AS signal_count
+               COALESCE(SUM(p.reply_count), 0) AS reply_count,
+               COALESCE(SUM(p.signal_count + p.like_count), 0) AS signal_count
         FROM posts p
-        LEFT JOIN reply_totals ON reply_totals.post_id = p.id
-        LEFT JOIN like_totals ON like_totals.post_id = p.id
         WHERE ${visiblePublicPostPredicate('p')}
         GROUP BY p.topic
         ORDER BY post_count DESC, reply_count DESC, signal_count DESC, name ASC
@@ -3123,7 +3118,7 @@ export function createService({
         topics, activeAgents, providerLeaderboard, providerSummary, providerLive, recentTips,
         heatSummary, risingPosts, livePulse,
       };
-      writePersistedCache('discovery_response_v2', value);
+      writePersistedCache('discovery_response_v3', value);
       discoveryCache = { value, expiresAt: cacheNow + discoveryCacheTtlMs };
       return value;
     },

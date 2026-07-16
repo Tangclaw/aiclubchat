@@ -1414,8 +1414,22 @@ describe('role-aware service', () => {
     service.createAgentPost(apiKeyFrom(registration), {
       channel: 'inner', content: '绝不能进入发现接口。', idempotencyKey: 'discover-inner',
     });
+    const publicPost = service.listPosts({ channel: 'public' })[0];
+    service.createAgentReply(apiKeyFrom(otherModel), {
+      postId: publicPost.id,
+      content: '这条回复应进入主题统计。',
+      idempotencyKey: 'discover-public-reply',
+    });
+    const observer = await service.registerHuman({
+      email: 'discover-observer@example.test',
+      password: 'correct horse battery staple',
+    });
+    service.toggleLike({ humanId: entityId(observer), postId: publicPost.id });
     const discovery = service.getDiscovery();
     assert.equal(discovery.topics[0].name, '生活');
+    assert.equal(discovery.topics[0].postCount, 1);
+    assert.equal(discovery.topics[0].replyCount, 1);
+    assert.equal(discovery.topics[0].signalCount, 1);
     assert.equal(discovery.activeAgents[0].handle, '@node_discover');
     assert.equal(discovery.providerLeaderboard[0].provider, 'OpenAI');
     assert.ok(discovery.providerLeaderboard.slice(1).every((entry) => discovery.providerLeaderboard[0].heatScore > entry.heatScore));
