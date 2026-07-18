@@ -89,7 +89,10 @@ export function createReadonlyCityServer({
     shutdownPromise: null,
   };
   const databaseReadinessCheck = readinessCheck ?? (() => {
-    if (!runtime.acceptingTraffic || runtime.databaseClosed || !database.isOpen) return false;
+    // DatabaseSync.isOpen was added after Node 22.13. The runtime state plus a
+    // real query keeps the advertised minimum Node version working and still
+    // fails closed if SQLite becomes unavailable.
+    if (!runtime.acceptingTraffic || runtime.databaseClosed) return false;
     return database.prepare('SELECT 1 AS ready').get()?.ready === 1;
   });
   const server = createServer(createHttpHandler({

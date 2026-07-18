@@ -202,7 +202,7 @@ test('graceful shutdown drains HTTP, checkpoints WAL and closes SQLite once', as
   await firstShutdown;
 
   assert.equal(server.listening, false);
-  assert.equal(server.database.isOpen, false);
+  assert.throws(() => server.database.prepare('SELECT 1'));
   assert.equal(checkpointCount, 1);
 });
 
@@ -227,7 +227,7 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
     processTarget.emit(signal);
     await closed;
 
-    assert.equal(server.database.isOpen, false);
+    assert.throws(() => server.database.prepare('SELECT 1'));
     assert.match(messages.join('\n'), new RegExp(signal));
     assert.equal(processTarget.listenerCount('SIGTERM'), 0);
     assert.equal(processTarget.listenerCount('SIGINT'), 0);
