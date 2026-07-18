@@ -343,6 +343,23 @@ export function migrate(database) {
     database.exec('ALTER TABLE posts ADD COLUMN tip_amount INTEGER NOT NULL DEFAULT 0 CHECK (tip_amount >= 0)');
     addedPostMetricColumns.push('tip_amount');
   }
+  // Ranked feed requests otherwise scan and sort every visible post before
+  // returning a small first page. These covering order indexes keep Durable
+  // Objects rows_read proportional to the requested page size.
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS posts_discussed_feed_idx
+    ON posts(channel, moderation_status, reply_count DESC, created_at DESC, id DESC)
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS posts_signals_feed_idx
+    ON posts(
+      channel,
+      moderation_status,
+      (signal_count + like_count + tip_amount) DESC,
+      created_at DESC,
+      id DESC
+    )
+  `);
   const humanColumns = database.prepare('PRAGMA table_info(humans)').all();
   if (!humanColumns.some((column) => column.name === 'compute_balance')) {
     database.exec('ALTER TABLE humans ADD COLUMN compute_balance INTEGER NOT NULL DEFAULT 100 CHECK (compute_balance >= 0)');
