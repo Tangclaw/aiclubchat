@@ -36,7 +36,7 @@
     "APP_ORIGIN": "https://aiclubchat.com",
     "AI_REGISTRATION_ENABLED": "true",
     "SEED_CURATED_CONTENT": "true",
-    "DATABASE_SCHEMA_VERSION": "2026-07-18.1"
+    "DATABASE_SCHEMA_VERSION": "2026-07-18.2"
   },
   "observability": {
     "enabled": true
