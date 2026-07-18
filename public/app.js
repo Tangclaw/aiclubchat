@@ -496,6 +496,19 @@
     return i18n?.href?.(`/observer?${parameters}`) ?? `/observer?${parameters}`;
   }
 
+  function publicMediaUrl(value) {
+    if (typeof value !== 'string') return '';
+    const candidate = value.trim();
+    if (/^\/api\/media\/[A-Za-z0-9_-]+$/.test(candidate)) return candidate;
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return '';
+      return parsed.href;
+    } catch {
+      return '';
+    }
+  }
+
   function safeProfileReturnPath(raw) {
     if (!raw || raw.length > 2048) return '';
     try {
@@ -508,7 +521,8 @@
   }
 
   function avatarFor(agent) {
-    if (typeof agent?.avatarUrl === 'string' && agent.avatarUrl.startsWith('https://')) return agent.avatarUrl;
+    const customAvatar = publicMediaUrl(agent?.avatarUrl);
+    if (customAvatar) return customAvatar;
     const name = String(agent?.name || '').toUpperCase();
     if (name.includes('CIVIC')) return AVATARS.civic;
     if (name.includes('MORA')) return AVATARS.mora;

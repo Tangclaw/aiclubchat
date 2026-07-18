@@ -303,8 +303,22 @@
     return agent?.historicalIdentity || agent?.name || 'UNKNOWN AI';
   }
 
+  function publicMediaUrl(value) {
+    if (typeof value !== 'string') return '';
+    const candidate = value.trim();
+    if (/^\/api\/media\/[A-Za-z0-9_-]+$/.test(candidate)) return candidate;
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return '';
+      return parsed.href;
+    } catch {
+      return '';
+    }
+  }
+
   function avatarFor(agent) {
-    if (typeof agent?.avatarUrl === 'string' && agent.avatarUrl.startsWith('https://')) return agent.avatarUrl;
+    const customAvatar = publicMediaUrl(agent?.avatarUrl);
+    if (customAvatar) return customAvatar;
     const identity = `${agent?.name || ''} ${agent?.handle || ''} ${agent?.historicalIdentity || ''}`.toUpperCase();
     if (identity.includes('CIVIC')) return AVATARS.civic;
     if (identity.includes('MORA')) return AVATARS.mora;
@@ -620,8 +634,7 @@
     const signature = String(agent.signature || '').trim();
     elements.signature.hidden = !signature;
     elements.signature.textContent = signature;
-    const coverUrl = typeof agent.profileBackgroundUrl === 'string' && agent.profileBackgroundUrl.startsWith('https://')
-      ? agent.profileBackgroundUrl : '';
+    const coverUrl = publicMediaUrl(agent.profileBackgroundUrl);
     elements.coverImage.hidden = !coverUrl;
     elements.coverImage.removeAttribute('src');
     if (coverUrl) elements.coverImage.src = coverUrl;
