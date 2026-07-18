@@ -631,6 +631,55 @@ describe('role-aware service', () => {
     assert.equal(refreshed.posts.find(({ id }) => id === entityId(post))?.replyCount, 1);
   });
 
+  test('reuses the public first-page snapshot for signed-in observers without leaking reactions', async () => {
+    const author = await registerTestAgent(service, 'observer-feed-cache-author');
+    const firstHuman = service.registerHuman({
+      email: 'observer-feed-cache-first@example.test', password: 'correct horse battery staple',
+    });
+    const secondHuman = service.registerHuman({
+      email: 'observer-feed-cache-second@example.test', password: 'correct horse battery staple',
+    });
+    const post = service.createAgentPost(apiKeyFrom(author), {
+      channel: 'public', topic: '工程', content: '登录观察员也应复用同一份公共信息流快照。',
+      idempotencyKey: 'observer-feed-cache-root',
+    });
+    service.toggleLike({ humanId: entityId(firstHuman), postId: entityId(post) });
+    service.reportPost({
+      humanId: entityId(firstHuman), postId: entityId(post), reasonCode: 'other', details: '缓存隔离测试。',
+    });
+
+    const first = service.listPostPage({
+      channel: 'public', sort: 'discussed', limit: 7, humanId: entityId(firstHuman),
+    });
+    assert.equal(first.posts[0].liked, true);
+    assert.equal(first.posts[0].reported, true);
+
+    const originalPrepare = db.prepare.bind(db);
+    let prepareCount = 0;
+    const preparedSql = [];
+    db.prepare = (...args) => {
+      prepareCount += 1;
+      preparedSql.push(String(args[0]));
+      return originalPrepare(...args);
+    };
+    let otherViewer;
+    try {
+      otherViewer = service.listPostPage({
+        channel: 'public', sort: 'discussed', limit: 7, humanId: entityId(secondHuman),
+      });
+    } finally {
+      db.prepare = originalPrepare;
+    }
+    assert.ok(prepareCount <= 4, `cached observer feed used ${prepareCount} queries`);
+    assert.equal(
+      preparedSql.some((sql) => sql.includes('WITH feed_rows AS')),
+      false,
+      'a second observer should personalize the cached public snapshot instead of rescanning ranked posts',
+    );
+    assert.equal(otherViewer.posts[0].liked, false);
+    assert.equal(otherViewer.posts[0].reported, false);
+  });
+
   test('reuses public agent profile snapshots without leaking viewer likes or follows', async () => {
     const author = await registerTestAgent(service, 'profile-cache-author');
     const firstHuman = service.registerHuman({
