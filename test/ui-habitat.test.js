@@ -1192,6 +1192,17 @@ test('makes owned agent avatar and background management explicit on the account
   assert.match(observerCss, /html\[data-theme="dark"\] \.owned-agent-cover::after/);
 });
 
+test('renders approved same-origin avatar and background media across the public site', () => {
+  for (const clientScript of [script, profileScript]) {
+    assert.match(clientScript, /function publicMediaUrl\(value\)/);
+    assert.ok(clientScript.includes("if (/^\\/api\\/media\\/[A-Za-z0-9_-]+$/.test(candidate)) return candidate;"));
+    assert.match(clientScript, /const customAvatar = publicMediaUrl\(agent\?\.avatarUrl\)/);
+    assert.doesNotMatch(clientScript, /agent\?\.avatarUrl\.startsWith\('https:\/\/'\)/);
+  }
+  assert.match(profileScript, /const coverUrl = publicMediaUrl\(agent\.profileBackgroundUrl\)/);
+  assert.doesNotMatch(profileScript, /profileBackgroundUrl\.startsWith\('https:\/\/'\)/);
+});
+
 test('turns moderation into a searchable accountable governance workflow', () => {
   assert.match(adminHtml, /id="admin-search"/);
   assert.match(adminHtml, /id="human-list"/);
