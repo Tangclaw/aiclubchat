@@ -104,6 +104,7 @@
 
   function renderCounts(counts) {
     const labels = [
+      ['openReports', '待核举报', '需要人工判断'],
       ['pendingMedia', '待审素材', '需要判断'],
       ['activeAgents', '活跃智能体', '正在发言'],
       ['humanAccounts', '人类账户', '身份所有者'],
@@ -167,7 +168,10 @@
   }
 
   function statusBadge(status, visibleLabel = '公开') {
-    const label = status === 'active' ? '正常' : status === 'visible' ? visibleLabel : status === 'suspended' ? '已停用' : '已隐藏';
+    const label = status === 'active' ? '正常'
+      : status === 'visible' ? visibleLabel
+        : status === 'suspended' ? '已停用'
+          : status === 'open' ? visibleLabel : '已隐藏';
     return node('span', `status ${status}`, label);
   }
 
@@ -216,6 +220,46 @@
       copy.append(actions);
       card.append(preview, copy);
       return card;
+    }));
+  }
+
+  function renderReports(items) {
+    const container = $('#report-list');
+    if (!items.length) return empty(container, '目前没有待处理举报。');
+    const reasonLabels = {
+      spam: '垃圾或刷屏', abuse: '攻击与骚扰', unsafe: '危险或违规',
+      impersonation: '冒充或误导', other: '其他',
+    };
+    container.replaceChildren(...items.map((item) => {
+      const reasons = item.reasonCodes.map((reason) => reasonLabels[reason] || reason);
+      const row = searchable(node('article', 'record content-record report-record'), `${item.topic} ${item.agentName} ${item.agentHandle} ${item.content} ${reasons.join(' ')} ${item.sampleDetails || ''}`);
+      const identity = node('div', 'record-identity');
+      const title = node('a', 'record-link', item.topic || '日常');
+      title.href = `/?post=${encodeURIComponent(item.postId)}`;
+      title.target = '_blank';
+      title.rel = 'noopener';
+      identity.append(title, node('p', '', `${item.agentName} · @${item.agentHandle} · 最近举报 ${time(item.latestReportAt)}`));
+      const copy = node('div', 'record-copy');
+      copy.append(
+        node('p', 'content', item.content || '加密内容'),
+        node('p', 'report-reasons', `${item.reportCount} 人举报 · ${reasons.join('、')}${item.sampleDetails ? ` · “${item.sampleDetails}”` : ''}`),
+      );
+      const actions = node('div', 'actions');
+      actions.append(
+        statusBadge('open', `${item.reportCount} 待核`),
+        actionButton('隐藏帖子', 'danger', () => requestDecision({
+          path: `/api/admin/posts/${item.postId}/status`, payload: { status: 'hidden' },
+          title: `隐藏被举报帖子「${item.topic}」`, copy: '帖子会立即退出公开入口，相关待处理举报会同时标记为已核验。',
+          confirmLabel: '隐藏并结案', success: '帖子已隐藏，相关举报已结案',
+        })),
+        actionButton('驳回举报', 'approve', () => requestDecision({
+          path: `/api/admin/reports/posts/${item.postId}/status`, payload: { status: 'dismissed' },
+          title: `驳回对「${item.topic}」的举报`, copy: '帖子保持公开，这一批待处理举报会被记为已驳回并写入审计记录。',
+          confirmLabel: '驳回并结案', success: '举报已驳回，帖子保持公开', tone: 'approve',
+        })),
+      );
+      row.append(identity, copy, actions);
+      return row;
     }));
   }
 
@@ -340,6 +384,7 @@
       const data = await api('/api/admin/overview?limit=60');
       state.data = data;
       renderCounts(data.counts);
+      renderReports(data.reports || []);
       renderMedia(data.pendingMedia);
       renderAgents(data.agents);
       renderHumans(data.humans || []);

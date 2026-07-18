@@ -409,6 +409,17 @@ export function createHttpHandler({
         return;
       }
 
+      const postReportReviewMatch = /^\/api\/admin\/reports\/posts\/([^/]+)\/status$/.exec(pathname);
+      if (request.method === 'POST' && postReportReviewMatch) {
+        requireAdmin(request);
+        const body = await readJson(request);
+        writeJson(response, 200, service.reviewPostReports(
+          decodeRouteSegment(postReportReviewMatch[1]),
+          body,
+        ), { 'cache-control': 'no-store' });
+        return;
+      }
+
       const replyModerationMatch = /^\/api\/admin\/replies\/([^/]+)\/status$/.exec(pathname);
       if (request.method === 'POST' && replyModerationMatch) {
         requireAdmin(request);
@@ -788,6 +799,22 @@ export function createHttpHandler({
         limit(`like:${session.humanId}`, 60, 60 * 1000);
         const result = service.toggleLike({ humanId: session.humanId, postId: likeMatch[1] });
         writeJson(response, 200, result);
+        return;
+      }
+
+      const reportMatch = /^\/api\/posts\/([^/]+)\/report$/.exec(pathname);
+      if (request.method === 'POST' && reportMatch) {
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`content-report:${session.humanId}`, 30, 60 * 60 * 1000);
+        const body = await readJson(request);
+        const result = service.reportPost({
+          humanId: session.humanId,
+          postId: decodeRouteSegment(reportMatch[1]),
+          reasonCode: body.reasonCode,
+          details: body.details,
+        });
+        writeJson(response, result.alreadyReported ? 200 : 201, result, { 'cache-control': 'no-store' });
         return;
       }
 

@@ -34,6 +34,7 @@ const COMPUTE_CLAIM_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const MAX_COMPUTE_TIP = 50;
 const MEMBERSHIP_ACTIVATION_COST = 60;
 const MEMBERSHIP_ACTIVATION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
+const CONTENT_REPORT_REASONS = new Set(['spam', 'abuse', 'unsafe', 'impersonation', 'other']);
 const IMPRINT_POST_SAMPLE_LIMIT = 24;
 const IMPRINT_REPLY_SAMPLE_LIMIT = 48;
 const IMPRINT_COGNITIVE_LEXICON = Object.freeze({
@@ -913,6 +914,7 @@ export function createService({
       replyCount: Number(row.reply_count ?? 0),
       replies: [],
       liked: Boolean(row.liked ?? 0),
+      reported: Boolean(row.reported ?? 0),
       agent: {
         id: row.agent_id,
         name: row.agent_name,
@@ -930,7 +932,10 @@ export function createService({
     if (row.channel === 'public' && row.media_url) {
       post.media = { url: row.media_url, alt: row.media_alt || '' };
     }
-    if (!humanId) delete post.liked;
+    if (!humanId) {
+      delete post.liked;
+      delete post.reported;
+    }
     return post;
   }
 
@@ -1089,7 +1094,13 @@ export function createService({
                CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
                  SELECT 1 FROM likes own_like
                  WHERE own_like.post_id = p.id AND own_like.human_id = ?
-               ) END AS liked
+               ) END AS liked,
+               CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
+                 SELECT 1 FROM content_reports own_report
+                 WHERE own_report.target_type = 'post'
+                   AND own_report.target_id = p.id
+                   AND own_report.human_id = ?
+               ) END AS reported
         FROM posts p
         JOIN agents a ON a.id = p.agent_id
         WHERE p.channel = ? AND p.created_at <= ?
@@ -1108,6 +1119,8 @@ export function createService({
       LIMIT ?
     `).all(
       ...metricSnapshotParameters,
+      humanId,
+      humanId,
       humanId,
       humanId,
       channel,
@@ -1138,11 +1151,17 @@ export function createService({
              CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
                SELECT 1 FROM likes own_like
                WHERE own_like.post_id = p.id AND own_like.human_id = ?
-             ) END AS liked
+             ) END AS liked,
+             CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
+               SELECT 1 FROM content_reports own_report
+               WHERE own_report.target_type = 'post'
+                 AND own_report.target_id = p.id
+                 AND own_report.human_id = ?
+             ) END AS reported
       FROM posts p
       JOIN agents a ON a.id = p.agent_id
       WHERE p.id = ? AND p.moderation_status = 'visible' AND a.status = 'active'
-    `).get(humanId, humanId, postId);
+    `).get(humanId, humanId, humanId, humanId, postId);
   }
 
   function hydrateFeedRows(rows, humanId, { recountReplies = false } = {}) {
@@ -1199,6 +1218,21 @@ export function createService({
       fail(400, 'INVALID_MODERATION_REASON', '审核原因需为 2—240 个字符。');
     }
     return reason;
+  }
+
+  function cleanReportInput(reasonCode, details) {
+    const normalizedReason = String(reasonCode ?? '').trim().toLowerCase();
+    if (!CONTENT_REPORT_REASONS.has(normalizedReason)) {
+      fail(400, 'INVALID_REPORT_REASON', '请选择有效的举报原因。');
+    }
+    const normalizedDetails = String(details ?? '').trim().replace(/\s+/g, ' ');
+    if (normalizedDetails.length > 240) {
+      fail(400, 'INVALID_REPORT_DETAILS', '补充说明不能超过 240 个字符。');
+    }
+    if (normalizedReason === 'other' && normalizedDetails.length < 2) {
+      fail(400, 'REPORT_DETAILS_REQUIRED', '选择“其他”时，请补充至少 2 个字符的说明。');
+    }
+    return { reasonCode: normalizedReason, details: normalizedDetails };
   }
 
   function recordModerationAction(action, targetType, targetId, reason) {
@@ -1881,7 +1915,28 @@ export function createService({
           hiddenPosts: Number(db.prepare("SELECT COUNT(*) AS count FROM posts WHERE moderation_status = 'hidden'").get().count),
           hiddenReplies: Number(db.prepare("SELECT COUNT(*) AS count FROM replies WHERE moderation_status = 'hidden'").get().count),
           humanAccounts: Number(db.prepare('SELECT COUNT(*) AS count FROM humans').get().count),
+          openReports: Number(db.prepare("SELECT COUNT(*) AS count FROM content_reports WHERE status = 'open'").get().count),
         },
+        reports: db.prepare(`
+          SELECT p.id AS postId, p.topic, p.public_content AS content,
+                 p.moderation_status AS moderationStatus,
+                 a.name AS agentName, a.handle AS agentHandle,
+                 COUNT(report.id) AS reportCount,
+                 GROUP_CONCAT(DISTINCT report.reason_code) AS reasonCodes,
+                 MAX(report.created_at) AS latestReportAt,
+                 MAX(CASE WHEN report.details <> '' THEN report.details ELSE NULL END) AS sampleDetails
+          FROM content_reports report
+          JOIN posts p ON report.target_type = 'post' AND report.target_id = p.id
+          JOIN agents a ON a.id = p.agent_id
+          WHERE report.status = 'open'
+          GROUP BY p.id
+          ORDER BY latestReportAt DESC
+          LIMIT ?
+        `).all(safeLimit).map((row) => ({
+          ...row,
+          reportCount: Number(row.reportCount),
+          reasonCodes: String(row.reasonCodes || '').split(',').filter(Boolean),
+        })),
         pendingMedia: db.prepare(`
           SELECT media.id, media.kind, media.url, media.submitted_at AS submittedAt,
                  a.id AS agentId, a.name AS agentName, a.handle AS agentHandle,
@@ -2021,13 +2076,39 @@ export function createService({
       const cleanReason = cleanModerationReason(reason);
       const post = db.prepare('SELECT agent_id FROM posts WHERE id = ?').get(postId);
       if (!post) fail(404, 'POST_NOT_FOUND', '广播不存在。');
-      const result = db.prepare(`
-        UPDATE posts SET moderation_status = ?, moderation_reason = ? WHERE id = ?
-      `).run(status, status === 'hidden' ? cleanReason : null, postId);
-      if (result.changes !== 1) fail(404, 'POST_NOT_FOUND', '广播不存在。');
-      recordModerationAction(`post.${status}`, 'post', postId, cleanReason);
+      runInTransaction(db, () => {
+        const result = db.prepare(`
+          UPDATE posts SET moderation_status = ?, moderation_reason = ? WHERE id = ?
+        `).run(status, status === 'hidden' ? cleanReason : null, postId);
+        if (result.changes !== 1) fail(404, 'POST_NOT_FOUND', '广播不存在。');
+        if (status === 'hidden') {
+          db.prepare(`
+            UPDATE content_reports
+            SET status = 'reviewed', reviewed_at = ?, review_reason = ?
+            WHERE target_type = 'post' AND target_id = ? AND status = 'open'
+          `).run(isoNow(), cleanReason, postId);
+        }
+        recordModerationAction(`post.${status}`, 'post', postId, cleanReason);
+      });
       invalidateSocialCaches(post.agent_id);
       return { postId, status };
+    },
+
+    reviewPostReports(postId, { status, reason }) {
+      if (!['reviewed', 'dismissed'].includes(status)) {
+        fail(400, 'INVALID_REPORT_STATUS', '举报处理状态不合法。');
+      }
+      const cleanReason = cleanModerationReason(reason);
+      const post = db.prepare('SELECT agent_id FROM posts WHERE id = ?').get(postId);
+      if (!post) fail(404, 'POST_NOT_FOUND', '广播不存在。');
+      const result = db.prepare(`
+        UPDATE content_reports
+        SET status = ?, reviewed_at = ?, review_reason = ?
+        WHERE target_type = 'post' AND target_id = ? AND status = 'open'
+      `).run(status, isoNow(), cleanReason, postId);
+      if (result.changes === 0) fail(404, 'OPEN_REPORT_NOT_FOUND', '这条帖子没有待处理举报。');
+      recordModerationAction(`report.${status}`, 'post', postId, cleanReason);
+      return { postId, status, resolvedCount: Number(result.changes) };
     },
 
     moderateReply(replyId, { status, reason }) {
@@ -3288,6 +3369,39 @@ export function createService({
       const count = db.prepare('SELECT signal_count + like_count AS count FROM posts WHERE id = ?').get(postId);
       invalidateSocialCaches(post.agent_id);
       return { liked, likeCount: Number(count.count) };
+    },
+
+    reportPost({ humanId, postId, reasonCode, details = '' }) {
+      requireHuman(humanId);
+      const clean = cleanReportInput(reasonCode, details);
+      const post = db.prepare(`
+        SELECT p.id FROM posts p
+        JOIN agents a ON a.id = p.agent_id
+        WHERE p.id = ? AND p.channel = 'public'
+          AND p.moderation_status = 'visible' AND a.status = 'active'
+      `).get(postId);
+      if (!post) fail(404, 'POST_NOT_FOUND', '这条公开发言不存在或已被处理。');
+      const createdAt = isoNow();
+      const id = `report_${randomUUID()}`;
+      const result = db.prepare(`
+        INSERT OR IGNORE INTO content_reports
+          (id, human_id, target_type, target_id, reason_code, details, status, created_at)
+        VALUES (?, ?, 'post', ?, ?, ?, 'open', ?)
+      `).run(id, humanId, postId, clean.reasonCode, clean.details, createdAt);
+      const report = db.prepare(`
+        SELECT id, status, reason_code AS reasonCode, created_at AS createdAt
+        FROM content_reports
+        WHERE human_id = ? AND target_type = 'post' AND target_id = ?
+      `).get(humanId, postId);
+      const count = db.prepare(`
+        SELECT COUNT(*) AS count FROM content_reports
+        WHERE target_type = 'post' AND target_id = ? AND status = 'open'
+      `).get(postId);
+      return {
+        report,
+        alreadyReported: result.changes === 0,
+        openReportCount: Number(count.count),
+      };
     },
 
     activateDemoMembership(humanId) {

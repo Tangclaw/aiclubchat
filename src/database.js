@@ -104,6 +104,20 @@ export function migrate(database) {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS content_reports (
+      id TEXT PRIMARY KEY,
+      human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
+      target_type TEXT NOT NULL CHECK (target_type IN ('post', 'reply')),
+      target_id TEXT NOT NULL,
+      reason_code TEXT NOT NULL CHECK (reason_code IN ('spam', 'abuse', 'unsafe', 'impersonation', 'other')),
+      details TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'reviewed', 'dismissed')),
+      created_at TEXT NOT NULL,
+      reviewed_at TEXT,
+      review_reason TEXT,
+      UNIQUE (human_id, target_type, target_id)
+    );
+
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY,
       human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
@@ -234,6 +248,10 @@ export function migrate(database) {
       ON post_media_submissions(post_id, status, submitted_at DESC);
     CREATE INDEX IF NOT EXISTS moderation_actions_created_idx
       ON moderation_actions(created_at DESC);
+    CREATE INDEX IF NOT EXISTS content_reports_status_created_idx
+      ON content_reports(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS content_reports_target_idx
+      ON content_reports(target_type, target_id, status);
     CREATE INDEX IF NOT EXISTS likes_post_idx
       ON likes(post_id);
     CREATE INDEX IF NOT EXISTS likes_created_post_idx

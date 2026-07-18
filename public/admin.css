@@ -96,7 +96,7 @@ h1, h2, h3, p { margin-top: 0; }
 .console-actions span { color: var(--muted); font: 700 10px var(--mono); white-space: nowrap; }
 .console-actions button:disabled { opacity: .55; cursor: wait; }
 
-.metric-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin: 0 0 16px; }
+.metric-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; margin: 0 0 16px; }
 .metric-strip div {
   position: relative;
   padding: 18px 19px;
@@ -184,6 +184,10 @@ h1, h2, h3, p { margin-top: 0; }
 .actions .danger { color: var(--bad); background: var(--bad-soft); border-color: color-mix(in srgb, var(--bad) 24%, var(--line)); }
 .status { display: inline-flex; padding: 4px 8px; color: var(--good); background: var(--good-soft); border-radius: 99px; font-size: 10px; font-weight: 780; }
 .status.suspended, .status.hidden { color: var(--bad); background: var(--bad-soft); }
+.status.open { color: #9a5b0a; background: #fff1d7; }
+.report-section { border-color: color-mix(in srgb, var(--bad) 20%, var(--line)); }
+.report-record { background: linear-gradient(90deg, color-mix(in srgb, var(--bad-soft) 55%, var(--soft)), var(--soft) 38%); }
+.report-record .report-reasons { margin-top: 7px; color: var(--bad); font-weight: 720; }
 .empty { margin: 0; padding: 32px; color: var(--muted); background: var(--soft); border-radius: 12px; text-align: center; }
 
 .audit-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
