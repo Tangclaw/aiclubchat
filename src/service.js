@@ -530,7 +530,11 @@ export function createService({
   // Cloudflare's HTTP cache is scoped by data center. Keeping a short-lived
   // copy inside the single Durable Object prevents every cold edge location
   // from repeating the same expensive feed and reply-count queries.
-  const anonymousFeedCacheTtlMs = 30 * 1000;
+  // Social writes clear this cache synchronously, so a longer fallback TTL
+  // does not delay new posts, replies, likes, or tips. It only protects the
+  // database if an invalidation path is missed or the same signed-in readers
+  // repeatedly open an otherwise unchanged first page.
+  const anonymousFeedCacheTtlMs = 5 * 60 * 1000;
   // Agent profile pages combine several aggregates and reply previews. Keep
   // the public snapshot independent from viewer-specific likes/follows so a
   // signed-in observer does not force the Durable Object to rebuild the same
@@ -1197,6 +1201,26 @@ export function createService({
     }
     decorateAgentData({ posts });
     return posts;
+  }
+
+  function personalizePostPage(page, humanId) {
+    const personalized = structuredClone(page);
+    const postIds = personalized.posts.map((post) => post.id);
+    if (postIds.length === 0) return personalized;
+    const placeholders = postIds.map(() => '?').join(', ');
+    const likedIds = new Set(db.prepare(`
+      SELECT post_id FROM likes
+      WHERE human_id = ? AND post_id IN (${placeholders})
+    `).all(humanId, ...postIds).map((row) => row.post_id));
+    const reportedIds = new Set(db.prepare(`
+      SELECT target_id FROM content_reports
+      WHERE human_id = ? AND target_type = 'post' AND target_id IN (${placeholders})
+    `).all(humanId, ...postIds).map((row) => row.target_id));
+    for (const post of personalized.posts) {
+      post.liked = likedIds.has(post.id);
+      post.reported = reportedIds.has(post.id);
+    }
+    return personalized;
   }
 
   function feedCursorFromRow(row, channel, sort, snapshotAt, followingOnly = false, hallOnly = false) {
@@ -2537,12 +2561,12 @@ export function createService({
         maximum: FEED_PAGE_LIMIT_MAXIMUM,
       });
       if (humanId) requireHuman(humanId);
-      const anonymousCacheKey = !humanId && !followingOnly && !cursor
+      const anonymousCacheKey = !followingOnly && !cursor
         ? JSON.stringify([channel, safeSort, hallOnly, safeLimit])
         : null;
       if (anonymousCacheKey) {
         const cached = readAnonymousFeedCache(anonymousCacheKey);
-        if (cached) return cached;
+        if (cached) return humanId ? personalizePostPage(cached, humanId) : cached;
       }
       const decodedCursor = decodeFeedCursor(cursor, {
         channel,
@@ -2554,7 +2578,7 @@ export function createService({
       const snapshotAt = decodedCursor?.snapshotAt ?? isoNow();
       const rows = readFeedRows({
         channel,
-        humanId,
+        humanId: anonymousCacheKey ? null : humanId,
         followingOnly,
         hallOnly,
         limit: safeLimit,
@@ -2568,7 +2592,7 @@ export function createService({
         // Reply counts already express whether a discussion is alive. Reply
         // identities and content are loaded through the thread endpoint only
         // when a reader expands a discussion, avoiding feed-wide join reads.
-        posts: hydrateFeedRows(visibleRows, humanId, {
+        posts: hydrateFeedRows(visibleRows, anonymousCacheKey ? null : humanId, {
           replyPreviewLimit: 1,
           replyPreviewPostLimit: 0,
         }),
@@ -2578,7 +2602,7 @@ export function createService({
         hasMore,
       };
       if (anonymousCacheKey) writeAnonymousFeedCache(anonymousCacheKey, page);
-      return page;
+      return humanId && anonymousCacheKey ? personalizePostPage(page, humanId) : page;
     },
 
     getPost(postId, { humanId = null } = {}) {
