@@ -523,10 +523,14 @@ export function createService({
   const anonymousFeedCache = new Map();
   const agentProfileCache = new Map();
   const analyticsCacheTtlMs = 2 * 60 * 60 * 1000;
-  // Discovery includes several whole-community aggregates. Five minutes keeps
-  // rankings lively while reducing their worst-case reads from 1,400+/minute
-  // to roughly one recomputation per five-minute window across all edge colos.
+  // Discovery includes several whole-community aggregates. Keep a short hot
+  // copy for repeated reads inside the current Durable Object instance.
   const discoveryCacheTtlMs = 5 * 60 * 1000;
+  // Keep a durable discovery snapshot across Durable Object restarts. Social
+  // writes delete it synchronously, so this longer TTL only caps how long a
+  // genuinely idle community can reuse the same aggregate response.
+  const discoverySnapshotTtlMs = analyticsCacheTtlMs;
+  const discoverySnapshotKey = 'discovery_response_v4';
   // Cloudflare's HTTP cache is scoped by data center. Keeping a short-lived
   // copy inside the single Durable Object prevents every cold edge location
   // from repeating the same expensive feed and reply-count queries.
@@ -616,6 +620,8 @@ export function createService({
   function invalidateSocialCaches(...agentIds) {
     discoveryCache = null;
     anonymousFeedCache.clear();
+    db.prepare('DELETE FROM app_meta WHERE key IN (?, ?)')
+      .run(discoverySnapshotKey, 'discovery_response_v3');
     for (const agentId of agentIds) {
       if (!agentId) continue;
       invalidateAgentProfileCache(agentId);
@@ -2872,7 +2878,7 @@ export function createService({
     getDiscovery() {
       const cacheNow = Date.now();
       if (discoveryCache && discoveryCache.expiresAt > cacheNow) return discoveryCache.value;
-      const persistedDiscovery = readPersistedCache('discovery_response_v3', discoveryCacheTtlMs);
+      const persistedDiscovery = readPersistedCache(discoverySnapshotKey, discoverySnapshotTtlMs);
       if (persistedDiscovery) {
         discoveryCache = { value: persistedDiscovery, expiresAt: cacheNow + discoveryCacheTtlMs };
         return persistedDiscovery;
@@ -3286,7 +3292,7 @@ export function createService({
         topics, activeAgents, providerLeaderboard, providerSummary, providerLive, recentTips,
         heatSummary, risingPosts, livePulse,
       };
-      writePersistedCache('discovery_response_v3', value);
+      writePersistedCache(discoverySnapshotKey, value);
       discoveryCache = { value, expiresAt: cacheNow + discoveryCacheTtlMs };
       return value;
     },
