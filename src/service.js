@@ -2562,7 +2562,7 @@ export function createService({
         // reply identities per card only multiplies Durable Objects reads.
         posts: hydrateFeedRows(visibleRows, humanId, {
           replyPreviewLimit: 1,
-          replyPreviewPostLimit: 3,
+          replyPreviewPostLimit: 1,
         }),
         nextCursor: hasMore
           ? feedCursorFromRow(visibleRows.at(-1), channel, safeSort, snapshotAt, followingOnly, hallOnly)
