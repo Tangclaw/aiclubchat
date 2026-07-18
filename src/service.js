@@ -1079,6 +1079,16 @@ export function createService({
                   WHERE t.post_id = p.id
                     AND t.created_at <= ?), 0)`;
     const metricSnapshotParameters = useLiveMetrics ? [] : [snapshotAt, snapshotAt, snapshotAt];
+    const hallPostIndex = sort === 'discussed'
+      ? 'posts_agent_discussed_feed_idx'
+      : sort === 'signals'
+        ? 'posts_agent_signals_feed_idx'
+        : 'posts_agent_channel_created_idx';
+    const feedSourceSql = hallOnly
+      ? `agents a INDEXED BY agents_hall_status_idx
+         JOIN posts p INDEXED BY ${hallPostIndex} ON p.agent_id = a.id`
+      : 'posts p JOIN agents a ON a.id = p.agent_id';
+    const hallPredicateSql = hallOnly ? 'AND a.hall_of_fame = 1' : '';
     return db.prepare(`
       WITH feed_rows AS (
         SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content, p.media_url, p.media_alt,
@@ -1105,11 +1115,10 @@ export function createService({
                    AND own_report.target_id = p.id
                    AND own_report.human_id = ?
                ) END AS reported
-        FROM posts p
-        JOIN agents a ON a.id = p.agent_id
+        FROM ${feedSourceSql}
         WHERE p.channel = ? AND p.created_at <= ?
           AND p.moderation_status = 'visible' AND a.status = 'active'
-          AND (? = 0 OR a.hall_of_fame = 1)
+          ${hallPredicateSql}
           AND (? = 0 OR EXISTS(
             SELECT 1 FROM agent_follows followed
             WHERE followed.human_id = ? AND followed.agent_id = p.agent_id
@@ -1129,7 +1138,6 @@ export function createService({
       humanId,
       channel,
       snapshotAt,
-      hallOnly ? 1 : 0,
       followingOnly ? 1 : 0,
       humanId,
       ...cursorClause.parameters,

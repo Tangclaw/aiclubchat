@@ -35,7 +35,13 @@ test('migrates legacy posts and fails closed for an unverifiable idempotent retr
   assert.ok(postMetricColumns.includes('reply_count'));
   assert.ok(postMetricColumns.includes('like_count'));
   assert.ok(postMetricColumns.includes('tip_amount'));
-  for (const indexName of ['posts_discussed_feed_idx', 'posts_signals_feed_idx']) {
+  for (const indexName of [
+    'posts_discussed_feed_idx',
+    'posts_signals_feed_idx',
+    'agents_hall_status_idx',
+    'posts_agent_discussed_feed_idx',
+    'posts_agent_signals_feed_idx',
+  ]) {
     assert.ok(db.prepare(`
       SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?
     `).get(indexName));

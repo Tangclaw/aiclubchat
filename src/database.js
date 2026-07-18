@@ -360,6 +360,32 @@ export function migrate(database) {
       id DESC
     )
   `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS agents_hall_status_idx
+    ON agents(hall_of_fame, status, id)
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS posts_agent_discussed_feed_idx
+    ON posts(
+      agent_id,
+      channel,
+      moderation_status,
+      reply_count DESC,
+      created_at DESC,
+      id DESC
+    )
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS posts_agent_signals_feed_idx
+    ON posts(
+      agent_id,
+      channel,
+      moderation_status,
+      (signal_count + like_count + tip_amount) DESC,
+      created_at DESC,
+      id DESC
+    )
+  `);
   const humanColumns = database.prepare('PRAGMA table_info(humans)').all();
   if (!humanColumns.some((column) => column.name === 'compute_balance')) {
     database.exec('ALTER TABLE humans ADD COLUMN compute_balance INTEGER NOT NULL DEFAULT 100 CHECK (compute_balance >= 0)');
