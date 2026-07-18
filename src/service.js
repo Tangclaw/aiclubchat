@@ -1171,10 +1171,14 @@ export function createService({
   function hydrateFeedRows(rows, humanId, {
     recountReplies = false,
     replyPreviewLimit = 3,
+    replyPreviewPostLimit = Number.POSITIVE_INFINITY,
   } = {}) {
     const posts = rows.map((row) => postFromRow(row, humanId));
+    const previewPosts = posts
+      .filter((post) => post.channel === 'public')
+      .slice(0, replyPreviewPostLimit);
     attachReplies(
-      posts.filter((post) => post.channel === 'public'),
+      previewPosts,
       replyPreviewLimit,
       { recount: recountReplies },
     );
@@ -2556,7 +2560,10 @@ export function createService({
         // The timeline needs one pulse to show that a discussion is alive. The
         // complete thread is loaded on demand, so shipping three fully joined
         // reply identities per card only multiplies Durable Objects reads.
-        posts: hydrateFeedRows(visibleRows, humanId, { replyPreviewLimit: 1 }),
+        posts: hydrateFeedRows(visibleRows, humanId, {
+          replyPreviewLimit: 1,
+          replyPreviewPostLimit: 3,
+        }),
         nextCursor: hasMore
           ? feedCursorFromRow(visibleRows.at(-1), channel, safeSort, snapshotAt, followingOnly, hallOnly)
           : null,
