@@ -11,6 +11,8 @@
   const quickConnectButton = document.querySelector('#quick-connect-button');
   const quickConnectLabel = document.querySelector('#quick-connect-label');
   const quickConnectCopy = document.querySelector('#quick-connect-copy');
+  const ownedAgentContext = document.querySelector('#owned-agent-context');
+  const ownedAgentContextCopy = document.querySelector('#owned-agent-context-copy');
   const quickError = document.querySelector('#quick-error');
   const quickStatus = document.querySelector('#quick-status');
   const serviceState = document.querySelector('#agent-service-state');
@@ -81,6 +83,8 @@
   const completedSteps = new Set();
   let pulseTimer = 0;
   let registrationAvailability = 'checking';
+  let humanConnectionState = 'unknown';
+  let ownedAgentCount = 0;
 
   function setAgentTheme(theme, persist = false) {
     const dark = theme === 'dark';
@@ -152,7 +156,14 @@
     const advancedLabel = advancedToggle?.querySelector('b');
     if (advancedLabel) advancedLabel.textContent = t(advancedOpen ? 'closeAdvanced' : 'openAdvanced');
     if (quickConnectLabel && quickForm.getAttribute('aria-busy') !== 'true') {
-      quickConnectLabel.textContent = t('quickConnectButton');
+      quickConnectLabel.textContent = t(humanConnectionState === 'guest'
+        ? 'signInToCreateAgent'
+        : humanConnectionState === 'new'
+          ? 'createFirstAgent'
+          : 'quickConnectButton');
+    }
+    if (ownedAgentContextCopy && ownedAgentCount > 0) {
+      ownedAgentContextCopy.textContent = t('ownedAgentContextCopy', { count: ownedAgentCount });
     }
   }
 
@@ -378,6 +389,49 @@
     return session;
   }
 
+  function setHumanConnectionState(nextState, count = 0, { focus = false } = {}) {
+    humanConnectionState = nextState;
+    ownedAgentCount = Math.max(0, Number(count) || 0);
+    const hasOwnedAgents = nextState === 'owned';
+    if (ownedAgentContext) ownedAgentContext.hidden = !hasOwnedAgents;
+    if (advancedToggle) advancedToggle.hidden = hasOwnedAgents;
+    if (hasOwnedAgents) {
+      quickForm.hidden = true;
+      advancedOnboarding.hidden = true;
+      advancedProgress.hidden = true;
+      incubator.classList.remove('is-advanced');
+      if (focus) ownedAgentContext?.focus({ preventScroll: true });
+    } else if (advancedOnboarding.hidden) {
+      quickForm.hidden = false;
+    }
+    syncQuickLabels();
+  }
+
+  async function probeHumanAgentContext() {
+    try {
+      const response = await fetch('/api/session', {
+        credentials: 'same-origin', cache: 'no-store', headers: { accept: 'application/json' },
+      });
+      const session = await readResponse(response);
+      if (!response.ok || !session?.user) {
+        setHumanConnectionState('guest');
+        return;
+      }
+      const agentsResponse = await fetch('/api/me/agents', {
+        credentials: 'same-origin', cache: 'no-store', headers: { accept: 'application/json' },
+      });
+      const agents = await readResponse(agentsResponse);
+      if (!agentsResponse.ok) {
+        setHumanConnectionState('unknown');
+        return;
+      }
+      const count = Number(agents?.count ?? agents?.agents?.length ?? 0);
+      setHumanConnectionState(count > 0 ? 'owned' : 'new', count);
+    } catch {
+      setHumanConnectionState('unknown');
+    }
+  }
+
   async function probeRegistrationAvailability() {
     setRegistrationAvailability('checking');
     try {
@@ -550,26 +604,8 @@
       });
       const result = await readResponse(response);
       if (!response.ok) {
-        const ownedAgentId = result?.error?.details?.agent?.id;
-        if (
-          response.status === 409
-          && result?.error?.code === 'AGENT_ALREADY_CONNECTED'
-          && typeof ownedAgentId === 'string'
-          && ownedAgentId
-          && window.confirm(t('confirmKeyRotation'))
-        ) {
-          const rotationResponse = await fetch(`/api/me/agents/${encodeURIComponent(ownedAgentId)}/keys/rotate`, {
-            method: 'POST',
-            credentials: 'same-origin',
-            cache: 'no-store',
-            referrerPolicy: 'no-referrer',
-            headers: { accept: 'application/json', 'x-csrf-token': session.csrf },
-          });
-          const rotated = await readResponse(rotationResponse);
-          if (!rotationResponse.ok) {
-            throw new Error(rotated?.error?.message || t('incubationError', { status: rotationResponse.status }));
-          }
-          showCredential(rotated);
+        if (response.status === 409 && result?.error?.code === 'AGENT_ALREADY_CONNECTED') {
+          setHumanConnectionState('owned', result?.error?.details?.count || 1, { focus: true });
           return;
         }
         throw new Error(result?.error?.message || t('incubationError', { status: response.status }));
@@ -784,7 +820,7 @@
     if (scroll) scrollToElement(incubator, 'start');
   }
 
-  restartButton.addEventListener('click', () => resetIncubator());
+  restartButton.addEventListener('click', () => location.assign('/observer#owned-agents-card'));
 
   window.addEventListener('pagehide', clearCredentialSecrets);
   window.addEventListener('pageshow', (event) => {
@@ -797,4 +833,5 @@
   syncQuickLabels();
   showStep(1, { focus: false, announce: false });
   probeRegistrationAvailability();
+  probeHumanAgentContext();
 })();

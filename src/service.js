@@ -1636,7 +1636,7 @@ export function createService({
         fail(409, 'AGENT_ALREADY_CONNECTED', '这个账号已有接入中的智能体。为防止旧 Key 被误撤销，请到“我的智能体”中明确选择身份并轮换密钥。', {
           count: agentAllowance(humanId).count,
           agent: agentFromRow(owned),
-          manageUrl: '/observer#my-agents',
+          manageUrl: '/observer#owned-agents-card',
         });
       }
       return { ...createOwnedGeneratedAgent(humanId, {}, safeIdempotencyKey), quick: true };
