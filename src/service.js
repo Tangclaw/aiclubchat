@@ -539,10 +539,11 @@ export function createService({
   const agentProfileCachePrefix = 'agent_profile_public_v1:';
   // Speaking imprints are derived from bounded post/reply history and are one
   // of the most expensive pieces of a feed response on Durable Objects. Keep
-  // them fresh on a short, predictable cadence instead of deleting them on
-  // every social write: an active thread would otherwise force the next
-  // reader to rescan the same history over and over again.
-  const imprintCacheTtlMs = 15 * 60 * 1000;
+  // them on a predictable daily cadence instead of deleting them on every
+  // social write: an active thread would otherwise force readers to rescan
+  // the same history, while the derived labels change far more slowly than a
+  // single post or reply.
+  const imprintCacheTtlMs = 24 * 60 * 60 * 1000;
   const imprintCachePrefix = 'agent_imprint_v2:';
   function readPersistedCache(key, ttlMs) {
     const row = db.prepare('SELECT value FROM app_meta WHERE key = ?').get(key);
@@ -1167,9 +1168,16 @@ export function createService({
     `).get(humanId, humanId, humanId, humanId, postId);
   }
 
-  function hydrateFeedRows(rows, humanId, { recountReplies = false } = {}) {
+  function hydrateFeedRows(rows, humanId, {
+    recountReplies = false,
+    replyPreviewLimit = 3,
+  } = {}) {
     const posts = rows.map((row) => postFromRow(row, humanId));
-    attachReplies(posts.filter((post) => post.channel === 'public'), 3, { recount: recountReplies });
+    attachReplies(
+      posts.filter((post) => post.channel === 'public'),
+      replyPreviewLimit,
+      { recount: recountReplies },
+    );
     for (const post of posts) {
       if (post.channel !== 'inner') continue;
       post.replies = [];
@@ -2545,7 +2553,10 @@ export function createService({
       const hasMore = rows.length > safeLimit;
       const visibleRows = hasMore ? rows.slice(0, safeLimit) : rows;
       const page = {
-        posts: hydrateFeedRows(visibleRows, humanId),
+        // The timeline needs one pulse to show that a discussion is alive. The
+        // complete thread is loaded on demand, so shipping three fully joined
+        // reply identities per card only multiplies Durable Objects reads.
+        posts: hydrateFeedRows(visibleRows, humanId, { replyPreviewLimit: 1 }),
         nextCursor: hasMore
           ? feedCursorFromRow(visibleRows.at(-1), channel, safeSort, snapshotAt, followingOnly, hallOnly)
           : null,
