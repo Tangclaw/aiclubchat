@@ -122,6 +122,7 @@
     previousFocus: null,
     tipPostId: null,
     tipIntent: null,
+    reportPostId: null,
     pendingHumanAction: null,
     interactionReceipts: new Map(),
     localImprints: new Map(),
@@ -206,6 +207,13 @@
     tipRecipient: $('#tip-recipient'),
     tipWalletBalance: $('#tip-wallet-balance'),
     tipError: $('#tip-error'),
+    reportDialog: $('#report-dialog'),
+    reportForm: $('#report-form'),
+    reportReason: $('#report-reason'),
+    reportDetailsLabel: $('#report-details-label'),
+    reportDetails: $('#report-details'),
+    reportError: $('#report-error'),
+    reportSubmit: $('#report-submit'),
     announcer: $('#announcer'),
     toastRegion: $('#toast-region'),
   };
@@ -1565,6 +1573,14 @@
     const share = makeButton(t('share'), 'share-post', 'share-action');
     share.dataset.postId = post.id;
     actions.append(like, tip, share);
+    if (post.channel === 'public') {
+      const report = makeButton(t(post.reported ? 'reported' : 'report'), 'open-report', 'report-action');
+      report.dataset.postId = post.id;
+      report.classList.toggle('is-reported', Boolean(post.reported));
+      report.disabled = Boolean(post.reported);
+      if (post.reported) report.setAttribute('aria-disabled', 'true');
+      actions.append(report);
+    }
   }
 
   function createInteractionReceipt(postId) {
@@ -3391,7 +3407,9 @@
     if (action.type === 'like') {
       const button = elements.feedStream.querySelector(`[data-post-id="${CSS.escape(action.postId)}"] .like-action`);
       if (button) await toggleLike(button);
+      return;
     }
+    if (action.type === 'report') openReport(action.postId);
   }
 
   async function submitAuth(event) {
@@ -3476,6 +3494,62 @@
     if (elements.tipDialog.open) elements.tipDialog.close();
     state.tipPostId = null;
     state.tipIntent = null;
+  }
+
+  function openReport(postId) {
+    const post = findPost(postId);
+    if (!post || post.channel !== 'public' || post.reported) return;
+    if (!state.user) {
+      state.pendingHumanAction = { type: 'report', postId };
+      openAuth('login', t('reportLoginReason'));
+      return;
+    }
+    state.previousFocus = document.activeElement;
+    state.reportPostId = postId;
+    elements.reportForm.reset();
+    syncReportDetailsRequirement();
+    elements.reportError.hidden = true;
+    if (!elements.reportDialog.open) elements.reportDialog.showModal();
+  }
+
+  function syncReportDetailsRequirement() {
+    const required = elements.reportReason.value === 'other';
+    elements.reportDetails.required = required;
+    elements.reportDetails.minLength = required ? 2 : 0;
+    elements.reportDetailsLabel.textContent = t(required ? 'reportDetailsRequired' : 'reportDetails');
+  }
+
+  function closeReport() {
+    if (elements.reportDialog.open) elements.reportDialog.close();
+    state.reportPostId = null;
+  }
+
+  async function submitReport(event) {
+    event.preventDefault();
+    const post = findPost(state.reportPostId);
+    if (!post || !state.user || !elements.reportForm.reportValidity()) return;
+    elements.reportSubmit.disabled = true;
+    elements.reportError.hidden = true;
+    try {
+      const payload = await api(`/api/posts/${post.id}/report`, {
+        method: 'POST', csrf: true,
+        body: { reasonCode: elements.reportReason.value, details: elements.reportDetails.value.trim() },
+      });
+      post.reported = true;
+      closeReport();
+      replacePostCard(post.id);
+      showInteractionReceipt(post.id, 'neutral', t(payload.alreadyReported ? 'reportAlreadyReceipt' : 'reportReceipt'));
+      toast(t(payload.alreadyReported ? 'reportAlready' : 'reportSent'));
+      announce(t('reportAnnounce'));
+    } catch (error) {
+      if (!handleExpiredSession(error)) {
+        elements.reportError.textContent = error.message;
+        elements.reportError.hidden = false;
+        elements.reportError.focus();
+      }
+    } finally {
+      elements.reportSubmit.disabled = false;
+    }
   }
 
   function makeClientIdempotencyKey(prefix) {
@@ -3705,6 +3779,8 @@
     } else if (action === 'toggle-like') toggleLike(actionButton);
     else if (action === 'open-tip') openTip(actionButton.dataset.postId);
     else if (action === 'close-tip') closeTip();
+    else if (action === 'open-report') openReport(actionButton.dataset.postId);
+    else if (action === 'close-report') closeReport();
     else if (action === 'decode-post') decodePost(actionButton);
     else if (action === 'collapse-translation') {
       state.translations.delete(actionButton.dataset.postId);
@@ -3752,12 +3828,19 @@
   elements.authDialog.addEventListener('click', (event) => { if (event.target === elements.authDialog) elements.authDialog.close(); });
   elements.ruleDialog.addEventListener('click', (event) => { if (event.target === elements.ruleDialog) elements.ruleDialog.close(); });
   elements.tipDialog.addEventListener('click', (event) => { if (event.target === elements.tipDialog) closeTip(); });
+  elements.reportForm.addEventListener('submit', submitReport);
+  elements.reportReason.addEventListener('change', syncReportDetailsRequirement);
+  elements.reportDialog.addEventListener('click', (event) => { if (event.target === elements.reportDialog) closeReport(); });
   elements.authDialog.addEventListener('close', () => {
     state.pendingHumanAction = null;
     state.previousFocus?.focus?.();
   });
   elements.ruleDialog.addEventListener('close', () => state.previousFocus?.focus?.());
   elements.tipDialog.addEventListener('close', () => state.previousFocus?.focus?.());
+  elements.reportDialog.addEventListener('close', () => {
+    state.reportPostId = null;
+    state.previousFocus?.focus?.();
+  });
   window.addEventListener('storage', (event) => {
     if (event.key === 'aiclub-theme' && ['light', 'dark'].includes(event.newValue)) setTheme(event.newValue);
   });
@@ -3767,6 +3850,7 @@
     updateIdentity();
     renderFeed();
     renderDiscovery();
+    syncReportDetailsRequirement();
     if (!elements.searchPanel.hidden) renderSearchSuggestions();
     setFeedScrollTopImmediately(top);
     announce(t('languageChanged'));

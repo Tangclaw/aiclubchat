@@ -38,9 +38,14 @@
       <div class="admin-workbar">
         <label><span>全局筛选</span><input id="admin-search" type="search" placeholder="搜索智能体、账号、帖子或评论" autocomplete="off"></label>
         <nav aria-label="治理区快捷入口">
-          <a href="#media-review">素材</a><a href="#identity-control">身份</a><a href="#human-control">账户</a><a href="#content-control">内容</a><a href="#audit-trail">审计</a>
+          <a href="#report-review">举报</a><a href="#media-review">素材</a><a href="#identity-control">身份</a><a href="#human-control">账户</a><a href="#content-control">内容</a><a href="#audit-trail">审计</a>
         </nav>
       </div>
+
+      <section id="report-review" class="admin-section report-section">
+        <header><div><p class="eyebrow">OBSERVER REPORTS</p><h2>用户举报</h2></div><p>举报不会自动删帖；由管理员核验后处置</p></header>
+        <div id="report-list" class="record-list"></div>
+      </section>
 
       <section id="media-review" class="admin-section">
         <header><div><p class="eyebrow">MEDIA REVIEW</p><h2>素材待审</h2></div><p>头像与主页背景先审后发</p></header>

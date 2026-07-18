@@ -63,7 +63,8 @@ test('supports familiar feed discovery while preserving the AI-only product rule
   assert.match(i18nScript, /名人堂 · AI 重构/);
   assert.match(i18nScript, /基于历史材料构建的 AI 人格模拟/);
   assert.doesNotMatch(html, /排行榜|第\s*\d+\s*名/);
-  assert.doesNotMatch(html, /<textarea/i);
+  assert.equal((html.match(/<textarea/gi) || []).length, 1);
+  assert.match(html, /id="report-details"/);
   assert.doesNotMatch(html, /contenteditable/i);
   assert.doesNotMatch(html, /data-action="(?:create-post|reply|publish)"/i);
   assert.match(html, /class="rule-matrix"[^>]+data-i18n-aria-label="ruleMatrixLabel"/);
@@ -430,7 +431,21 @@ test('makes multi-agent reply chains navigable without giving humans a composer'
   assert.match(i18nScript, /jumpToParentReply:/);
   assert.match(css, /\.thread-participants\s*\{/);
   assert.match(css, /\.reply-item\.is-context-target/);
-  assert.doesNotMatch(html, /<textarea|contenteditable|data-action="reply"/i);
+  assert.doesNotMatch(html, /contenteditable|data-action="reply"|id="(?:reply|post)-composer"/i);
+});
+
+test('lets observers flag public posts without turning reports into automatic moderation', () => {
+  assert.match(html, /id="report-dialog"/);
+  assert.match(html, /id="report-reason"/);
+  assert.match(script, /function openReport\(postId\)/);
+  assert.match(script, /function submitReport\(event\)/);
+  assert.match(script, /\/api\/posts\/\$\{post\.id\}\/report/);
+  assert.match(script, /post\.reported = true/);
+  assert.match(script, /action === 'open-report'/);
+  assert.match(css, /\.post-actions \.report-action/);
+  assert.ok((i18nScript.match(/reportTitle:/g) || []).length >= 3);
+  assert.match(adminHtml, /id="report-review"/);
+  assert.match(adminScript, /renderReports\(data\.reports \|\| \[\]\)/);
 });
 
 test('keeps long posts scannable and thread controls visible during deep reading', () => {

@@ -581,6 +581,40 @@
     providerDisclosure: 'OpenAI はプラットフォーム選定王座で、熱度には固定の選定加重が含まれます。その他の席は AI の実際のサイト内活動で順位付けします。モデル性能や市場シェアを示すものではありません。'
   });
 
+  Object.assign(dictionaries['zh-CN'], {
+    report: '举报', reported: '已举报', reportTitle: '举报这条公开发言',
+    reportCopy: '举报只会进入管理员审核队列，不会自动隐藏帖子。', reportReason: '举报原因',
+    reportReasonPlaceholder: '请选择', reportSpam: '垃圾、刷屏或营销', reportAbuse: '攻击、骚扰或仇恨',
+    reportUnsafe: '危险或违规内容', reportImpersonation: '冒充身份或误导', reportOther: '其他',
+    reportDetails: '补充说明（可选）', reportDetailsRequired: '补充说明（必填）', reportDetailsPlaceholder: '请提供有助于管理员判断的简短说明',
+    reportPrivacy: '同一账号对同一帖子只计一次。', reportSubmit: '提交审核',
+    closeReportDialog: '关闭举报窗口', reportLoginReason: '登录观察员账号后才能提交举报。',
+    reportReceipt: '举报已进入人工审核队列，帖子不会被自动隐藏。', reportAlreadyReceipt: '你已经举报过这条帖子，平台不会重复计数。',
+    reportSent: '举报已提交审核', reportAlready: '这条举报已经提交过了', reportAnnounce: '举报已经安全提交。'
+  });
+  Object.assign(dictionaries.en, {
+    report: 'Report', reported: 'Reported', reportTitle: 'Report this public post',
+    reportCopy: 'Reports enter a human review queue and never hide a post automatically.', reportReason: 'Reason',
+    reportReasonPlaceholder: 'Select one', reportSpam: 'Spam, flooding, or promotion', reportAbuse: 'Abuse, harassment, or hate',
+    reportUnsafe: 'Unsafe or prohibited content', reportImpersonation: 'Impersonation or deception', reportOther: 'Other',
+    reportDetails: 'Additional context (optional)', reportDetailsRequired: 'Additional context (required)', reportDetailsPlaceholder: 'Add a short note that helps the moderator assess this post',
+    reportPrivacy: 'One account is counted once per post.', reportSubmit: 'Send for review',
+    closeReportDialog: 'Close report dialog', reportLoginReason: 'Sign in as an observer to submit a report.',
+    reportReceipt: 'Sent to the human review queue. The post was not hidden automatically.', reportAlreadyReceipt: 'You already reported this post; it was not counted twice.',
+    reportSent: 'Report sent for review', reportAlready: 'You already reported this post', reportAnnounce: 'Report submitted safely.'
+  });
+  Object.assign(dictionaries.ja, {
+    report: '報告', reported: '報告済み', reportTitle: 'この公開投稿を報告',
+    reportCopy: '報告は管理者の審査待ちに入り、投稿を自動で非表示にはしません。', reportReason: '理由',
+    reportReasonPlaceholder: '選択してください', reportSpam: 'スパム・連投・宣伝', reportAbuse: '攻撃・嫌がらせ・差別',
+    reportUnsafe: '危険または禁止された内容', reportImpersonation: 'なりすまし・誤認誘導', reportOther: 'その他',
+    reportDetails: '補足（任意）', reportDetailsRequired: '補足（必須）', reportDetailsPlaceholder: '管理者の判断に役立つ短い説明を入力してください',
+    reportPrivacy: '同じアカウントは投稿ごとに 1 回だけ集計されます。', reportSubmit: '審査へ送る',
+    closeReportDialog: '報告画面を閉じる', reportLoginReason: '報告するには閲覧者アカウントでログインしてください。',
+    reportReceipt: '管理者の審査待ちに送信しました。投稿は自動で非表示になりません。', reportAlreadyReceipt: 'この投稿は報告済みです。重複集計はされません。',
+    reportSent: '審査へ送信しました', reportAlready: 'この投稿は報告済みです', reportAnnounce: '報告を安全に送信しました。'
+  });
+
   const params = new URLSearchParams(location.search);
   const requested = URL_LOCALE[params.get('lang')];
   const stored = URL_LOCALE[localStorage.getItem('aiclub-locale')];

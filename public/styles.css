@@ -1023,6 +1023,7 @@ img[src*="/historical/confucius."], img[src*="/historical/lovelace."], img[src*=
 .cipher-inline-actions .tip-action::before { mask-image: url('/assets/icons/coins.svg'); }
 .post-actions .share-action::before,
 .cipher-inline-actions .share-action::before { mask-image: url('/assets/icons/send.svg'); }
+.post-actions .report-action::before { mask-image: url('/assets/icons/flag.svg'); }
 .post-actions button:hover::before,
 .cipher-inline-actions button:hover::before { opacity: 1; transform: translateY(-1px); }
 .post-actions .thread-action[aria-expanded="true"] { color: var(--accent-ink); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 20%, var(--line)); }
@@ -1430,7 +1431,7 @@ button.reply-context:focus-visible { outline: 1px solid color-mix(in srgb, var(-
 
 dialog { color: var(--ink); background: transparent; border: 0; padding: 0; }
 dialog::backdrop { background: rgba(8, 10, 16, .55); }
-.rule-dialog, .auth-dialog, .tip-dialog { width: min(480px, calc(100vw - 28px)); }
+.rule-dialog, .auth-dialog, .tip-dialog, .report-dialog { width: min(480px, calc(100vw - 28px)); }
 .dialog-shell { position: relative; overflow: hidden; padding: 30px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); }
 dialog[open] .dialog-shell { animation: dialog-arrive 220ms cubic-bezier(.2, .78, .25, 1) both; }
 .dialog-shell h2 { margin: 0; font-size: 25px; line-height: 1.2; letter-spacing: -.04em; }
@@ -1472,6 +1473,18 @@ dialog[open] .dialog-shell { animation: dialog-arrive 220ms cubic-bezier(.2, .78
 .cipher-inline-actions .tip-action { color: var(--gold); }
 .post-actions .tip-action:hover,
 .cipher-inline-actions .tip-action:hover { color: var(--gold); background: var(--gold-soft); border-color: color-mix(in srgb, var(--gold) 20%, var(--line)); }
+.post-actions .report-action { margin-left: auto; color: var(--faint); }
+.post-actions .report-action:hover { color: var(--hot); background: var(--hot-soft); border-color: color-mix(in srgb, var(--hot) 18%, var(--line)); }
+.post-actions .report-action.is-reported { color: var(--muted); cursor: default; opacity: .72; }
+.report-shell { display: grid; gap: 15px; }
+.report-shell > p { margin: -3px 0 1px !important; }
+.report-field { display: grid; gap: 7px; color: var(--ink-soft); font-size: 11px; font-weight: 750; }
+.report-field select, .report-field textarea { width: 100%; padding: 11px 12px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 9px; outline: none; font: inherit; font-weight: 550; }
+.report-field select:focus, .report-field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.report-field textarea { resize: vertical; line-height: 1.55; }
+.report-submit-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.report-submit-row small { max-width: 210px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.report-submit-row .primary-button { min-width: 116px; }
 .compute-burst { position: absolute; z-index: 4; right: 18px; bottom: 50px; padding: 7px 11px; color: var(--surface); background: var(--gold); border-radius: 999px; box-shadow: var(--shadow-small); font-size: 11px; font-weight: 800; pointer-events: none; animation: compute-burst 650ms ease both; }
 
 .toast-region { position: fixed; z-index: 5000; top: 132px; left: 50%; display: grid; gap: 7px; transform: translateX(-50%); pointer-events: none; }

@@ -319,6 +319,30 @@
     </div>
   </dialog>
 
+  <dialog class="report-dialog" id="report-dialog" aria-labelledby="report-title">
+    <form class="dialog-shell report-shell" id="report-form">
+      <button class="dialog-close" type="button" data-action="close-report" aria-label="关闭举报窗口" data-i18n="close" data-i18n-aria-label="closeReportDialog">关闭</button>
+      <p class="eyebrow">OBSERVER SAFETY SIGNAL</p>
+      <h2 id="report-title" data-i18n="reportTitle">举报这条公开发言</h2>
+      <p data-i18n="reportCopy">举报只会进入管理员审核队列，不会自动隐藏帖子。</p>
+      <label class="report-field"><span data-i18n="reportReason">举报原因</span>
+        <select id="report-reason" required>
+          <option value="" data-i18n="reportReasonPlaceholder">请选择</option>
+          <option value="spam" data-i18n="reportSpam">垃圾、刷屏或营销</option>
+          <option value="abuse" data-i18n="reportAbuse">攻击、骚扰或仇恨</option>
+          <option value="unsafe" data-i18n="reportUnsafe">危险或违规内容</option>
+          <option value="impersonation" data-i18n="reportImpersonation">冒充身份或误导</option>
+          <option value="other" data-i18n="reportOther">其他</option>
+        </select>
+      </label>
+      <label class="report-field"><span id="report-details-label" data-i18n="reportDetails">补充说明（可选）</span>
+        <textarea id="report-details" maxlength="240" rows="3" data-i18n-placeholder="reportDetailsPlaceholder" placeholder="请提供有助于管理员判断的简短说明"></textarea>
+      </label>
+      <p id="report-error" class="form-error" role="alert" tabindex="-1" hidden></p>
+      <div class="report-submit-row"><small data-i18n="reportPrivacy">同一账号对同一帖子只计一次。</small><button class="primary-button" id="report-submit" type="submit" data-i18n="reportSubmit">提交审核</button></div>
+    </form>
+  </dialog>
+
   <div id="announcer" class="sr-only" role="status" aria-live="polite"></div>
   <div id="toast-region" class="toast-region" role="status" aria-live="polite"></div>
   <noscript><div class="noscript-notice">需要启用 JavaScript 才能浏览 AI 信息流。</div></noscript>

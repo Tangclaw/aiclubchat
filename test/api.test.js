@@ -634,6 +634,63 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.match(translation.response.headers.get('cache-control'), /no-store/);
   });
 
+  test('deduplicates observer reports and keeps every moderation decision accountable', async () => {
+    const agent = await registerAgent('Report-Target');
+    const created = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agent.apiKey}`, 'idempotency-key': 'report-target-post' },
+      body: { channel: 'public', topic: '治理测试', content: '这是一条等待真实人工判断的公开发言。' },
+    });
+    const postId = created.json.post.id;
+    const observer = await registerHuman('reporter@example.com');
+
+    const anonymous = await request(`/api/posts/${postId}/report`, {
+      method: 'POST', body: { reasonCode: 'spam' },
+    });
+    assert.equal(anonymous.response.status, 401);
+
+    const first = await request(`/api/posts/${postId}/report`, {
+      method: 'POST', cookie: observer.cookie, csrf: observer.csrf,
+      body: { reasonCode: 'abuse', details: '需要管理员结合上下文判断。' },
+    });
+    assert.equal(first.response.status, 201);
+    assert.equal(first.json.alreadyReported, false);
+    assert.equal(first.json.openReportCount, 1);
+
+    const duplicate = await request(`/api/posts/${postId}/report`, {
+      method: 'POST', cookie: observer.cookie, csrf: observer.csrf,
+      body: { reasonCode: 'spam' },
+    });
+    assert.equal(duplicate.response.status, 200);
+    assert.equal(duplicate.json.alreadyReported, true);
+    assert.equal(duplicate.json.openReportCount, 1);
+
+    const feed = await request('/api/feed?channel=public', { cookie: observer.cookie });
+    assert.equal(feed.json.posts.find((post) => post.id === postId).reported, true);
+
+    const overview = await request('/api/admin/overview', {
+      headers: { authorization: `Bearer ${ADMIN_API_KEY}` },
+    });
+    assert.equal(overview.response.status, 200);
+    assert.equal(overview.json.counts.openReports, 1);
+    assert.equal(overview.json.reports[0].postId, postId);
+    assert.equal(overview.json.reports[0].reportCount, 1);
+    assert.deepEqual(overview.json.reports[0].reasonCodes, ['abuse']);
+
+    const dismissed = await request(`/api/admin/reports/posts/${postId}/status`, {
+      method: 'POST', headers: { authorization: `Bearer ${ADMIN_API_KEY}` },
+      body: { status: 'dismissed', reason: '核验上下文后未发现违规。' },
+    });
+    assert.equal(dismissed.response.status, 200);
+    assert.equal(dismissed.json.resolvedCount, 1);
+    const after = await request('/api/admin/overview', {
+      headers: { authorization: `Bearer ${ADMIN_API_KEY}` },
+    });
+    assert.equal(after.json.counts.openReports, 0);
+    assert.equal(after.json.reports.length, 0);
+    assert.ok(after.json.actions.some((action) => action.action === 'report.dismissed' && action.targetId === postId));
+  });
+
   test('exposes a CSRF-protected compute wallet and post tipping across both feed modes', async () => {
     const agent = await registerAgent('Compute-Receiver');
     const post = await request('/api/ai/posts', {
