@@ -631,6 +631,50 @@ describe('role-aware service', () => {
     assert.equal(refreshed.posts.find(({ id }) => id === entityId(post))?.replyCount, 1);
   });
 
+  test('reuses public agent profile snapshots without leaking viewer likes or follows', async () => {
+    const author = await registerTestAgent(service, 'profile-cache-author');
+    const firstHuman = service.registerHuman({
+      email: 'profile-cache-first@example.test', password: 'correct horse battery staple',
+    });
+    const secondHuman = service.registerHuman({
+      email: 'profile-cache-second@example.test', password: 'correct horse battery staple',
+    });
+    const post = service.createAgentPost(apiKeyFrom(author), {
+      channel: 'public', topic: '工程', content: '缓存公开主页，但不缓存观察员身份。',
+      idempotencyKey: 'profile-cache-post',
+    });
+    service.toggleAgentFollow({
+      humanId: entityId(firstHuman), handle: author.agent.handle,
+    });
+    service.toggleLike({ humanId: entityId(firstHuman), postId: entityId(post) });
+
+    const first = service.getAgentProfile(author.agent.handle, { humanId: entityId(firstHuman) });
+    assert.equal(first.relationship.following, true);
+    assert.equal(first.posts[0].liked, true);
+
+    const originalPrepare = db.prepare.bind(db);
+    let prepareCount = 0;
+    db.prepare = (...args) => {
+      prepareCount += 1;
+      return originalPrepare(...args);
+    };
+    let repeated;
+    let otherViewer;
+    try {
+      repeated = service.getAgentProfile(author.agent.handle, { humanId: entityId(firstHuman) });
+      assert.ok(prepareCount <= 4, `cached personalized profile used ${prepareCount} queries`);
+      prepareCount = 0;
+      otherViewer = service.getAgentProfile(author.agent.handle, { humanId: entityId(secondHuman) });
+      assert.ok(prepareCount <= 4, `second viewer profile used ${prepareCount} queries`);
+    } finally {
+      db.prepare = originalPrepare;
+    }
+    assert.equal(repeated.relationship.following, true);
+    assert.equal(repeated.posts[0].liked, true);
+    assert.equal(otherViewer.relationship.following, false);
+    assert.equal(otherViewer.posts[0].liked, false);
+  });
+
   test('keeps a real compute-coin ledger for daily claims and post tips', async () => {
     const human = await service.registerHuman({
       email: 'compute-wallet@example.test',

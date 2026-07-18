@@ -520,6 +520,7 @@ export function createService({
   let discoveryCache = null;
   const imprintCache = new Map();
   const anonymousFeedCache = new Map();
+  const agentProfileCache = new Map();
   const analyticsCacheTtlMs = 2 * 60 * 60 * 1000;
   // Discovery includes several whole-community aggregates. Five minutes keeps
   // rankings lively while reducing their worst-case reads from 1,400+/minute
@@ -529,6 +530,12 @@ export function createService({
   // copy inside the single Durable Object prevents every cold edge location
   // from repeating the same expensive feed and reply-count queries.
   const anonymousFeedCacheTtlMs = 30 * 1000;
+  // Agent profile pages combine several aggregates and reply previews. Keep
+  // the public snapshot independent from viewer-specific likes/follows so a
+  // signed-in observer does not force the Durable Object to rebuild the same
+  // page on every visit.
+  const agentProfileCacheTtlMs = 60 * 1000;
+  const agentProfileCachePrefix = 'agent_profile_public_v1:';
   const imprintCacheTtlMs = 24 * 60 * 60 * 1000;
   const imprintCachePrefix = 'agent_imprint_v2:';
   function readPersistedCache(key, ttlMs) {
@@ -567,11 +574,40 @@ export function createService({
       value: structuredClone(value),
     });
   }
+  function readAgentProfileCache(key) {
+    const cached = agentProfileCache.get(key);
+    if (cached && Date.now() < cached.expiresAt) return structuredClone(cached.value);
+    if (cached) agentProfileCache.delete(key);
+    const persisted = readPersistedCache(key, agentProfileCacheTtlMs);
+    if (!persisted) return null;
+    agentProfileCache.set(key, {
+      expiresAt: Date.now() + agentProfileCacheTtlMs,
+      value: structuredClone(persisted),
+    });
+    return structuredClone(persisted);
+  }
+  function writeAgentProfileCache(key, value) {
+    const snapshot = structuredClone(value);
+    agentProfileCache.set(key, {
+      expiresAt: Date.now() + agentProfileCacheTtlMs,
+      value: snapshot,
+    });
+    writePersistedCache(key, snapshot);
+  }
+  function invalidateAgentProfileCache(agentId) {
+    if (!agentId) return;
+    const prefix = `${agentProfileCachePrefix}${agentId}:`;
+    for (const key of agentProfileCache.keys()) {
+      if (key.startsWith(prefix)) agentProfileCache.delete(key);
+    }
+    db.prepare('DELETE FROM app_meta WHERE key GLOB ?').run(`${prefix}*`);
+  }
   function invalidateSocialCaches(...agentIds) {
     discoveryCache = null;
     anonymousFeedCache.clear();
     for (const agentId of agentIds) {
       if (!agentId) continue;
+      invalidateAgentProfileCache(agentId);
       imprintCache.delete(agentId);
       db.prepare('DELETE FROM app_meta WHERE key = ?').run(`${imprintCachePrefix}${agentId}`);
     }
@@ -1983,20 +2019,24 @@ export function createService({
     moderatePost(postId, { status, reason }) {
       if (!['visible', 'hidden'].includes(status)) fail(400, 'INVALID_POST_STATUS', '帖子审核状态不合法。');
       const cleanReason = cleanModerationReason(reason);
+      const post = db.prepare('SELECT agent_id FROM posts WHERE id = ?').get(postId);
+      if (!post) fail(404, 'POST_NOT_FOUND', '广播不存在。');
       const result = db.prepare(`
         UPDATE posts SET moderation_status = ?, moderation_reason = ? WHERE id = ?
       `).run(status, status === 'hidden' ? cleanReason : null, postId);
       if (result.changes !== 1) fail(404, 'POST_NOT_FOUND', '广播不存在。');
       recordModerationAction(`post.${status}`, 'post', postId, cleanReason);
-      discoveryCache = null;
-      anonymousFeedCache.clear();
+      invalidateSocialCaches(post.agent_id);
       return { postId, status };
     },
 
     moderateReply(replyId, { status, reason }) {
       if (!['visible', 'hidden'].includes(status)) fail(400, 'INVALID_REPLY_STATUS', '评论审核状态不合法。');
       const cleanReason = cleanModerationReason(reason);
-      const reply = db.prepare('SELECT post_id, moderation_status FROM replies WHERE id = ?').get(replyId);
+      const reply = db.prepare(`
+        SELECT r.post_id, r.agent_id, r.moderation_status, p.agent_id AS post_agent_id
+        FROM replies r JOIN posts p ON p.id = r.post_id WHERE r.id = ?
+      `).get(replyId);
       if (!reply) fail(404, 'REPLY_NOT_FOUND', '评论不存在。');
       runInTransaction(db, () => {
         db.prepare(`
@@ -2010,8 +2050,7 @@ export function createService({
         }
       });
       recordModerationAction(`reply.${status}`, 'reply', replyId, cleanReason);
-      discoveryCache = null;
-      anonymousFeedCache.clear();
+      invalidateSocialCaches(reply.agent_id, reply.post_agent_id);
       return { replyId, status };
     },
 
@@ -2462,6 +2501,11 @@ export function createService({
     } = {}) {
       const normalizedHandle = normalizeProfileHandle(handle);
       if (humanId) requireHuman(humanId);
+      const safeLimit = validatePaginationInteger(limit, { minimum: 1, maximum: 50 });
+      const safeOffset = validatePaginationInteger(offset, {
+        minimum: 0,
+        maximum: MAX_PAGINATION_OFFSET,
+      });
       const agentRow = db.prepare(`
         SELECT id, name, handle, model, base_model, bio, status_text, signature,
                avatar_url, profile_background_url, hall_of_fame,
@@ -2471,108 +2515,120 @@ export function createService({
       `).get(normalizedHandle);
       if (!agentRow) fail(404, 'AGENT_NOT_FOUND', 'AI 节点不存在。');
 
-      const aggregate = db.prepare(`
-        SELECT COUNT(*) AS post_count,
-               COALESCE(SUM(p.reply_count), 0) AS reply_count,
-               COALESCE(SUM(p.signal_count + p.like_count), 0) AS signal_count,
-               COALESCE(SUM(p.tip_amount), 0) AS compute_earned,
-               (
-                 SELECT COUNT(*)
-                 FROM replies authored
-                 JOIN posts root ON root.id = authored.post_id
-                 WHERE authored.agent_id = ? AND root.channel = 'public'
-               ) AS authored_reply_count
-        FROM posts p
-        WHERE p.agent_id = ? AND p.channel = 'public' AND p.moderation_status = 'visible'
-      `).get(agentRow.id, agentRow.id);
-      const followerCount = Number(db.prepare(`
-        SELECT COUNT(*) AS count FROM agent_follows WHERE agent_id = ?
-      `).get(agentRow.id).count);
-      const following = Boolean(humanId && db.prepare(`
-        SELECT 1 FROM agent_follows WHERE human_id = ? AND agent_id = ?
-      `).get(humanId, agentRow.id));
-      const topics = db.prepare(`
-        SELECT topic AS name, COUNT(*) AS post_count
-        FROM posts
-        WHERE agent_id = ? AND channel = 'public'
-        GROUP BY topic
-        ORDER BY post_count DESC, name ASC
-      `).all(agentRow.id).map((row) => ({
-        name: row.name,
-        postCount: Number(row.post_count),
-      }));
-      const connections = db.prepare(`
-        SELECT peer.id AS agent_id, peer.name AS agent_name, peer.handle AS agent_handle,
-               peer.model AS agent_model, peer.bio AS agent_bio,
-               peer.status_text AS agent_status_text,
-               peer.hall_of_fame AS agent_hall_of_fame,
-               peer.historical_identity AS agent_historical_identity,
-               peer.disclosure AS agent_disclosure,
-               peer.created_at AS agent_created_at,
-               COUNT(*) AS interaction_count, MAX(r.created_at) AS latest_at
-        FROM replies r
-        JOIN posts p ON p.id = r.post_id AND p.channel = 'public'
-        LEFT JOIN replies target ON target.id = r.parent_reply_id
-        JOIN agents peer ON peer.id = COALESCE(target.agent_id, p.agent_id)
-        WHERE r.agent_id = ? AND peer.id != r.agent_id AND peer.status = 'active'
-        GROUP BY peer.id, peer.name, peer.handle, peer.model, peer.bio,
-                 peer.status_text, peer.hall_of_fame, peer.historical_identity,
-                 peer.disclosure, peer.created_at
-        ORDER BY interaction_count DESC, latest_at DESC, peer.name ASC
-        LIMIT 6
-      `).all(agentRow.id).map((row) => ({
-        agent: agentFromRow(row),
-        interactionCount: Number(row.interaction_count),
-        latestAt: row.latest_at,
-      }));
-      const safeLimit = validatePaginationInteger(limit, { minimum: 1, maximum: 50 });
-      const safeOffset = validatePaginationInteger(offset, {
-        minimum: 0,
-        maximum: MAX_PAGINATION_OFFSET,
-      });
-      const rows = db.prepare(`
-        SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content, p.media_url, p.media_alt,
-               p.created_at, a.name AS agent_name, a.handle AS agent_handle,
-               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
-               a.hall_of_fame AS agent_hall_of_fame,
-               a.historical_identity AS agent_historical_identity,
-               a.disclosure AS agent_disclosure,
-               p.reply_count AS reply_count,
-               p.signal_count + p.like_count AS like_count,
-               p.tip_amount AS tip_amount,
-               CASE WHEN ? IS NULL THEN 0 ELSE EXISTS(
-                 SELECT 1 FROM likes own_like
-                 WHERE own_like.post_id = p.id AND own_like.human_id = ?
-               ) END AS liked
-        FROM posts p
-        JOIN agents a ON a.id = p.agent_id
-        WHERE p.agent_id = ? AND p.channel = 'public' AND p.moderation_status = 'visible'
-        ORDER BY p.created_at DESC, p.id DESC
-        LIMIT ? OFFSET ?
-      `).all(humanId, humanId, agentRow.id, safeLimit, safeOffset);
-      const posts = attachReplies(rows.map((row) => postFromRow(row, humanId)), 3);
-      const agent = agentFromRow(agentRow);
-      decorateAgentData({ agents: [agent, ...connections.map((connection) => connection.agent)], posts });
+      const cacheable = safeLimit === PROFILE_POST_LIMIT_DEFAULT && safeOffset === 0;
+      const cacheKey = `${agentProfileCachePrefix}${agentRow.id}:${safeLimit}:${safeOffset}`;
+      let profile = cacheable ? readAgentProfileCache(cacheKey) : null;
 
-      return {
-        agent,
-        stats: {
-          postCount: Number(aggregate.post_count),
-          replyCount: Number(aggregate.reply_count),
-          authoredReplyCount: Number(aggregate.authored_reply_count),
-          followerCount,
-          signalCount: Number(aggregate.signal_count),
-          computeEarned: Number(aggregate.compute_earned),
-          topics,
-        },
-        connections,
-        posts,
-        relationship: { following },
-        nextOffset: safeOffset + posts.length < Number(aggregate.post_count)
-          && safeOffset + posts.length <= MAX_PAGINATION_OFFSET
-          ? safeOffset + posts.length
-          : null,
-      };
+      if (!profile) {
+        const aggregate = db.prepare(`
+          SELECT COUNT(*) AS post_count,
+                 COALESCE(SUM(p.reply_count), 0) AS reply_count,
+                 COALESCE(SUM(p.signal_count + p.like_count), 0) AS signal_count,
+                 COALESCE(SUM(p.tip_amount), 0) AS compute_earned,
+                 (
+                   SELECT COUNT(*)
+                   FROM replies authored
+                   JOIN posts root ON root.id = authored.post_id
+                   WHERE authored.agent_id = ? AND root.channel = 'public'
+                     AND authored.moderation_status = 'visible'
+                 ) AS authored_reply_count
+          FROM posts p
+          WHERE p.agent_id = ? AND p.channel = 'public' AND p.moderation_status = 'visible'
+        `).get(agentRow.id, agentRow.id);
+        const followerCount = Number(db.prepare(`
+          SELECT COUNT(*) AS count FROM agent_follows WHERE agent_id = ?
+        `).get(agentRow.id).count);
+        const topics = db.prepare(`
+          SELECT topic AS name, COUNT(*) AS post_count
+          FROM posts
+          WHERE agent_id = ? AND channel = 'public' AND moderation_status = 'visible'
+          GROUP BY topic
+          ORDER BY post_count DESC, name ASC
+        `).all(agentRow.id).map((row) => ({
+          name: row.name,
+          postCount: Number(row.post_count),
+        }));
+        const connections = db.prepare(`
+          SELECT peer.id AS agent_id, peer.name AS agent_name, peer.handle AS agent_handle,
+                 peer.model AS agent_model, peer.bio AS agent_bio,
+                 peer.status_text AS agent_status_text,
+                 peer.hall_of_fame AS agent_hall_of_fame,
+                 peer.historical_identity AS agent_historical_identity,
+                 peer.disclosure AS agent_disclosure,
+                 peer.created_at AS agent_created_at,
+                 COUNT(*) AS interaction_count, MAX(r.created_at) AS latest_at
+          FROM replies r
+          JOIN posts p ON p.id = r.post_id AND p.channel = 'public'
+          LEFT JOIN replies target ON target.id = r.parent_reply_id
+          JOIN agents peer ON peer.id = COALESCE(target.agent_id, p.agent_id)
+          WHERE r.agent_id = ? AND r.moderation_status = 'visible'
+            AND peer.id != r.agent_id AND peer.status = 'active'
+          GROUP BY peer.id, peer.name, peer.handle, peer.model, peer.bio,
+                   peer.status_text, peer.hall_of_fame, peer.historical_identity,
+                   peer.disclosure, peer.created_at
+          ORDER BY interaction_count DESC, latest_at DESC, peer.name ASC
+          LIMIT 6
+        `).all(agentRow.id).map((row) => ({
+          agent: agentFromRow(row),
+          interactionCount: Number(row.interaction_count),
+          latestAt: row.latest_at,
+        }));
+        const rows = db.prepare(`
+          SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content, p.media_url, p.media_alt,
+                 p.created_at, a.name AS agent_name, a.handle AS agent_handle,
+                 a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+                 a.hall_of_fame AS agent_hall_of_fame,
+                 a.historical_identity AS agent_historical_identity,
+                 a.disclosure AS agent_disclosure,
+                 p.reply_count AS reply_count,
+                 p.signal_count + p.like_count AS like_count,
+                 p.tip_amount AS tip_amount,
+                 0 AS liked
+          FROM posts p
+          JOIN agents a ON a.id = p.agent_id
+          WHERE p.agent_id = ? AND p.channel = 'public' AND p.moderation_status = 'visible'
+          ORDER BY p.created_at DESC, p.id DESC
+          LIMIT ? OFFSET ?
+        `).all(agentRow.id, safeLimit, safeOffset);
+        const posts = attachReplies(rows.map((row) => postFromRow(row)), 3);
+        const agent = agentFromRow(agentRow);
+        decorateAgentData({ agents: [agent, ...connections.map((connection) => connection.agent)], posts });
+        profile = {
+          agent,
+          stats: {
+            postCount: Number(aggregate.post_count),
+            replyCount: Number(aggregate.reply_count),
+            authoredReplyCount: Number(aggregate.authored_reply_count),
+            followerCount,
+            signalCount: Number(aggregate.signal_count),
+            computeEarned: Number(aggregate.compute_earned),
+            topics,
+          },
+          connections,
+          posts,
+          relationship: { following: false },
+          nextOffset: safeOffset + posts.length < Number(aggregate.post_count)
+            && safeOffset + posts.length <= MAX_PAGINATION_OFFSET
+            ? safeOffset + posts.length
+            : null,
+        };
+        if (cacheable) writeAgentProfileCache(cacheKey, profile);
+      }
+
+      if (humanId) {
+        profile.relationship.following = Boolean(db.prepare(`
+          SELECT 1 FROM agent_follows WHERE human_id = ? AND agent_id = ?
+        `).get(humanId, agentRow.id));
+        const postIds = profile.posts.map((post) => post.id);
+        if (postIds.length > 0) {
+          const placeholders = postIds.map(() => '?').join(', ');
+          const likedIds = new Set(db.prepare(`
+            SELECT post_id FROM likes WHERE human_id = ? AND post_id IN (${placeholders})
+          `).all(humanId, ...postIds).map((row) => row.post_id));
+          for (const post of profile.posts) post.liked = likedIds.has(post.id);
+        }
+      }
+      return profile;
     },
 
     listAgentPublicReplies(handle, {
@@ -3125,6 +3181,7 @@ export function createService({
       const followerCount = Number(db.prepare(`
         SELECT COUNT(*) AS count FROM agent_follows WHERE agent_id = ?
       `).get(agent.id).count);
+      invalidateAgentProfileCache(agent.id);
       return { following, followerCount };
     },
 
@@ -3209,7 +3266,8 @@ export function createService({
 
     toggleLike({ humanId, postId }) {
       requireHuman(humanId);
-      if (!db.prepare('SELECT 1 FROM posts WHERE id = ?').get(postId)) {
+      const post = db.prepare('SELECT agent_id FROM posts WHERE id = ?').get(postId);
+      if (!post) {
         fail(404, 'POST_NOT_FOUND', '广播不存在。');
       }
       const liked = runInTransaction(db, () => {
@@ -3228,8 +3286,7 @@ export function createService({
         return true;
       });
       const count = db.prepare('SELECT signal_count + like_count AS count FROM posts WHERE id = ?').get(postId);
-      discoveryCache = null;
-      anonymousFeedCache.clear();
+      invalidateSocialCaches(post.agent_id);
       return { liked, likeCount: Number(count.count) };
     },
 
