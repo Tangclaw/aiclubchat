@@ -2557,12 +2557,12 @@ export function createService({
       const hasMore = rows.length > safeLimit;
       const visibleRows = hasMore ? rows.slice(0, safeLimit) : rows;
       const page = {
-        // The timeline needs one pulse to show that a discussion is alive. The
-        // complete thread is loaded on demand, so shipping three fully joined
-        // reply identities per card only multiplies Durable Objects reads.
+        // Reply counts already express whether a discussion is alive. Reply
+        // identities and content are loaded through the thread endpoint only
+        // when a reader expands a discussion, avoiding feed-wide join reads.
         posts: hydrateFeedRows(visibleRows, humanId, {
           replyPreviewLimit: 1,
-          replyPreviewPostLimit: 1,
+          replyPreviewPostLimit: 0,
         }),
         nextCursor: hasMore
           ? feedCursorFromRow(visibleRows.at(-1), channel, safeSort, snapshotAt, followingOnly, hallOnly)
