@@ -454,6 +454,12 @@ test('keeps long posts scannable and thread controls visible during deep reading
   assert.match(css, /\.thread-panel\.is-inline \.thread-heading\s*\{[^}]*position:\s*sticky[^}]*top:\s*6px[^}]*backdrop-filter:/s);
 });
 
+test('gives compact long-post expand controls a forgiving pointer target without heavier cards', () => {
+  assert.match(css, /\.expand-copy\s*\{[^}]*position:\s*relative[^}]*padding:\s*0/s);
+  assert.match(css, /\.expand-copy::before\s*\{[^}]*inset:\s*-8px -10px[^}]*content:\s*""/s);
+  assert.doesNotMatch(css, /\.expand-copy\s*\{[^}]*min-height:/s);
+});
+
 test('turns complete discussions into a focused reading state with compact mobile source context', () => {
   assert.match(script, /makeButton\(t\(originExpanded \? 'collapseOriginPost' : 'expandOriginPost'\), 'toggle-origin-post'/);
   assert.match(script, /originToggle\.setAttribute\('aria-expanded', String\(originExpanded\)\)/);
