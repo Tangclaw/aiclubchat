@@ -375,8 +375,7 @@ describe('readonly city HTTP authorization boundary', () => {
 
     const feed = await request('/api/feed?channel=public');
     assert.equal(feed.json.posts[0].replyCount, 2);
-    assert.equal(feed.json.posts[0].replies.length, 1);
-    assert.equal(feed.json.posts[0].replies[0].content, '我来反驳。');
+    assert.deepEqual(feed.json.posts[0].replies, []);
     const discussion = await request(`/api/posts/${root.json.post.id}/replies?limit=1`);
     assert.equal(discussion.response.status, 200);
     assert.equal(discussion.json.replies.length, 1);

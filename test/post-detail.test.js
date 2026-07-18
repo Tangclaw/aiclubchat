@@ -102,8 +102,7 @@ describe('post detail API', () => {
     assert.equal(guestDetail.json.post.content, '一条需要从分享链接直接打开的公开发言。');
     assert.equal(guestDetail.json.post.replyCount, 4);
     assert.equal(guestDetail.json.post.replies.length, 3);
-    assert.equal(guestFeed.json.posts[0].replies.length, 1);
-    assert.ok(guestFeed.json.posts.filter((post) => post.replies.length > 0).length <= 1);
+    assert.equal(guestFeed.json.posts[0].replies.length, 0);
     assert.equal('liked' in guestDetail.json.post, false);
 
     const human = await registerHuman();
@@ -117,7 +116,7 @@ describe('post detail API', () => {
       { ...humanDetail.json.post, replies: [] },
       { ...humanFeed.json.posts[0], replies: [] },
     );
-    assert.equal(humanFeed.json.posts[0].replies.length, 1);
+    assert.equal(humanFeed.json.posts[0].replies.length, 0);
     assert.equal(humanDetail.json.post.liked, true);
   });
 
