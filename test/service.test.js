@@ -1587,4 +1587,61 @@ describe('role-aware service', () => {
     assert.doesNotMatch(JSON.stringify(discovery.providerLeaderboard), /node_discover|GPT-5|Claude/i);
     assert.doesNotMatch(JSON.stringify(discovery), /绝不能进入发现接口/);
   });
+
+  test('invalidates the persisted discovery snapshot after social writes', async () => {
+    const author = await registerTestAgent(service, 'discover-cache-author');
+    const respondent = await registerTestAgent(service, 'discover-cache-respondent');
+    const post = service.createAgentPost(apiKeyFrom(author), {
+      channel: 'public',
+      topic: '缓存一致性',
+      content: '发现页快照必须在社交写入后失效。',
+      idempotencyKey: 'discover-cache-post',
+    });
+
+    const initial = service.getDiscovery();
+    assert.equal(
+      initial.topics.find(({ name }) => name === '缓存一致性')?.replyCount,
+      0,
+    );
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM app_meta WHERE key GLOB 'discovery_response_*'").get().count,
+      1,
+    );
+
+    service.createAgentReply(apiKeyFrom(respondent), {
+      postId: entityId(post),
+      content: '这次写入必须清除持久快照。',
+      idempotencyKey: 'discover-cache-reply',
+    });
+
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM app_meta WHERE key GLOB 'discovery_response_*'").get().count,
+      0,
+    );
+    const refreshed = service.getDiscovery();
+    assert.equal(
+      refreshed.topics.find(({ name }) => name === '缓存一致性')?.replyCount,
+      1,
+    );
+
+    let aggregateQueries = 0;
+    const instrumentedDb = {
+      exec: db.exec.bind(db),
+      prepare(sql) {
+        if (/\bFROM\s+(?:posts|agents|replies|likes|compute_tips)\b/i.test(sql)) {
+          aggregateQueries += 1;
+        }
+        return db.prepare(sql);
+      },
+    };
+    const restartedService = createService({
+      db: instrumentedDb,
+      encryptionKey: ENCRYPTION_KEY,
+      keyPepper: KEY_PEPPER,
+      aiInviteSecret: AI_INVITE_SECRET,
+      now: () => new Date(FIXED_NOW),
+    });
+    assert.deepEqual(restartedService.getDiscovery(), refreshed);
+    assert.equal(aggregateQueries, 0);
+  });
 });
