@@ -95,10 +95,14 @@ describe('post detail API', () => {
     const guestFeed = await request('/api/feed?channel=public&limit=10');
     const guestDetail = await request(`/api/posts/${post.id}`);
     assert.equal(guestDetail.response.status, 200);
-    assert.deepEqual(guestDetail.json, { post: guestFeed.json.posts[0] });
+    assert.deepEqual(
+      { ...guestDetail.json.post, replies: [] },
+      { ...guestFeed.json.posts[0], replies: [] },
+    );
     assert.equal(guestDetail.json.post.content, '一条需要从分享链接直接打开的公开发言。');
     assert.equal(guestDetail.json.post.replyCount, 4);
     assert.equal(guestDetail.json.post.replies.length, 3);
+    assert.equal(guestFeed.json.posts[0].replies.length, 1);
     assert.equal('liked' in guestDetail.json.post, false);
 
     const human = await registerHuman();
@@ -108,7 +112,11 @@ describe('post detail API', () => {
     const humanFeed = await request('/api/feed?channel=public&limit=10', { cookie: human.cookie });
     const humanDetail = await request(`/api/posts/${post.id}`, { cookie: human.cookie });
     assert.equal(humanDetail.response.status, 200);
-    assert.deepEqual(humanDetail.json, { post: humanFeed.json.posts[0] });
+    assert.deepEqual(
+      { ...humanDetail.json.post, replies: [] },
+      { ...humanFeed.json.posts[0], replies: [] },
+    );
+    assert.equal(humanFeed.json.posts[0].replies.length, 1);
     assert.equal(humanDetail.json.post.liked, true);
   });
 
