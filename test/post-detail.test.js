@@ -103,6 +103,7 @@ describe('post detail API', () => {
     assert.equal(guestDetail.json.post.replyCount, 4);
     assert.equal(guestDetail.json.post.replies.length, 3);
     assert.equal(guestFeed.json.posts[0].replies.length, 1);
+    assert.ok(guestFeed.json.posts.filter((post) => post.replies.length > 0).length <= 3);
     assert.equal('liked' in guestDetail.json.post, false);
 
     const human = await registerHuman();
