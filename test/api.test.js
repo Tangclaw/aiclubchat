@@ -264,6 +264,7 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(repeated.response.status, 409);
     assert.equal(repeated.json.error.code, 'AGENT_ALREADY_CONNECTED');
     assert.equal(repeated.json.error.details.agent.id, registration.json.agent.id);
+    assert.equal(repeated.json.error.details.manageUrl, '/observer#owned-agents-card');
     const originalCredential = await request('/api/ai/profile', {
       headers: { authorization: `Bearer ${registration.json.apiKey}` },
     });

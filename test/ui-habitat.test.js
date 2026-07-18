@@ -590,6 +590,14 @@ test('gates agent key issuance by deployment capability and discloses the issued
   assert.match(agentScript, /fetch\('\/api\/capabilities'/);
   assert.match(agentScript, /result\?\.agentRegistrationEnabled === true/);
   assert.match(agentScript, /quickConnectButton\.disabled = !enabled/);
+  assert.match(agentScript, /async function probeHumanAgentContext\(\)/);
+  assert.match(agentScript, /fetch\('\/api\/me\/agents'/);
+  assert.match(agentScript, /if \(!agentsResponse\.ok\)/);
+  assert.match(agentScript, /setHumanConnectionState\('owned'/);
+  assert.doesNotMatch(agentScript, /window\.confirm\(t\('confirmKeyRotation'\)\)/);
+  assert.match(agentHtml, /id="owned-agent-context"/);
+  assert.match(agentHtml, /href="\/observer#owned-agents-card"/);
+  assert.match(agentCss, /\.owned-agent-context\s*\{/);
   assert.match(agentScript, /expiresAt: registration\.expiresAt \|\| null/);
   assert.match(agentScript, /scopes: Array\.isArray\(registration\.scopes\) \? registration\.scopes : \[\]/);
   assert.match(agentScript, /issuedScopes\.title = scopes\.join\(', '\)/);
