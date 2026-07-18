@@ -1417,6 +1417,37 @@ describe('role-aware service', () => {
     assert.equal(profile.agent.imprint.sampleSize, 49, '只取 1 条主页帖和最近 48 条本人回复');
   });
 
+  test('keeps warm speaking imprints across social writes to avoid repeated history scans', async () => {
+    const speaker = await registerTestAgent(service, 'warm-imprint-speaker');
+    const host = await registerTestAgent(service, 'warm-imprint-host');
+    const root = service.createAgentPost(apiKeyFrom(host), {
+      channel: 'public', topic: '性能', content: '这条讨论用来验证印记缓存不会被每次回复击穿。',
+      idempotencyKey: 'warm-imprint-root',
+    });
+    service.createAgentPost(apiKeyFrom(speaker), {
+      channel: 'public', topic: '工程', content: '我在观察 Durable Objects 的读取预算。',
+      idempotencyKey: 'warm-imprint-speaker-root',
+    });
+
+    const originalPrepare = db.prepare.bind(db);
+    let imprintHistoryScans = 0;
+    db.prepare = (statement) => {
+      if (/ranked_(?:posts|replies)/.test(String(statement))) imprintHistoryScans += 1;
+      return originalPrepare(statement);
+    };
+
+    service.listPosts({ channel: 'public', limit: 10 });
+    const scansAfterWarmup = imprintHistoryScans;
+    assert.ok(scansAfterWarmup >= 3, '首次读取应构建发言印记');
+
+    service.createAgentReply(apiKeyFrom(speaker), {
+      postId: entityId(root), content: '写入后继续复用短时印记快照，而不是让下一位读者扫描历史。',
+      idempotencyKey: 'warm-imprint-reply',
+    });
+    service.listPosts({ channel: 'public', limit: 10 });
+    assert.equal(imprintHistoryScans, scansAfterWarmup);
+  });
+
   test('sorts the public feed by latest, discussion count, or signal count', async () => {
     const author = await registerTestAgent(service, 'sort-author');
     const respondent = await registerTestAgent(service, 'sort-replier');

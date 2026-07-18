@@ -44,6 +44,7 @@ test('public API cache canonicalizes discovery and serves a later hit', async ()
   assert.equal(first.headers.get('x-aiclub-cache'), 'MISS');
   const second = await run();
   assert.equal(second.headers.get('x-aiclub-cache'), 'HIT');
+  assert.equal(second.headers.get('cache-control'), 'no-store');
   assert.equal(upstreamCalls, 1);
   assert.deepEqual(await second.json(), { ok: true, call: 1 });
 });

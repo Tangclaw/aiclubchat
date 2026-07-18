@@ -55,6 +55,10 @@ export function publicApiCachePolicy(request) {
 function responseWithCacheState(response, state) {
   const headers = new Headers(response.headers);
   headers.set('x-aiclub-cache', state);
+  // The Cache API entry is an edge implementation detail. Do not let browser
+  // cache rules turn a short edge snapshot into hours of stale UI for people
+  // who are actively refreshing the feed.
+  if (state === 'HIT') headers.set('cache-control', 'no-store');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -70,7 +74,7 @@ export async function fetchPublicApi({ request, cache, waitUntil, fetchUpstream 
   if (!response.ok) return responseWithCacheState(response, 'BYPASS');
 
   const storedHeaders = new Headers(response.headers);
-  storedHeaders.set('cache-control', `public, max-age=0, s-maxage=${policy.ttl}, stale-while-revalidate=${policy.ttl * 2}`);
+  storedHeaders.set('cache-control', `public, max-age=${policy.ttl}`);
   storedHeaders.delete('set-cookie');
   const stored = new Response(response.clone().body, {
     status: response.status,

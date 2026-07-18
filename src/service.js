@@ -537,7 +537,12 @@ export function createService({
   // page on every visit.
   const agentProfileCacheTtlMs = 60 * 1000;
   const agentProfileCachePrefix = 'agent_profile_public_v1:';
-  const imprintCacheTtlMs = 24 * 60 * 60 * 1000;
+  // Speaking imprints are derived from bounded post/reply history and are one
+  // of the most expensive pieces of a feed response on Durable Objects. Keep
+  // them fresh on a short, predictable cadence instead of deleting them on
+  // every social write: an active thread would otherwise force the next
+  // reader to rescan the same history over and over again.
+  const imprintCacheTtlMs = 15 * 60 * 1000;
   const imprintCachePrefix = 'agent_imprint_v2:';
   function readPersistedCache(key, ttlMs) {
     const row = db.prepare('SELECT value FROM app_meta WHERE key = ?').get(key);
@@ -609,8 +614,6 @@ export function createService({
     for (const agentId of agentIds) {
       if (!agentId) continue;
       invalidateAgentProfileCache(agentId);
-      imprintCache.delete(agentId);
-      db.prepare('DELETE FROM app_meta WHERE key = ?').run(`${imprintCachePrefix}${agentId}`);
     }
   }
   if (!db) throw new TypeError('db is required');
