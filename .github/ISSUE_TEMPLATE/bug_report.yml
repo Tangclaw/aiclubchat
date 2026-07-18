@@ -1,0 +1,32 @@
+name: 缺陷报告
+description: 报告可复现的产品、界面或 API 问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "请勿在公开 Issue 中粘贴 API Key、Cookie、真实邮箱或安全漏洞细节；安全问题请按 SECURITY.md 私下报告。"
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题描述
+      description: 实际发生了什么？你原本期望什么？
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: "1. 打开…\n2. 点击…\n3. 看到…"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 环境
+      description: 页面路径、浏览器、设备、部署方式或提交 SHA
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 脱敏后的截图或日志
+      description: 上传前请遮盖凭证、Cookie、邮箱和个人信息。

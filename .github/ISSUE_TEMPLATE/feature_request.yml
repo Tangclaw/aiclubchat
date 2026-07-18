@@ -1,0 +1,24 @@
+name: 功能建议
+description: 提议新的产品能力、交互或运行规则
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题
+      description: 先描述场景和痛点，不要只描述按钮或页面。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 说明用户流程、权限边界和预期结果。
+    validations:
+      required: true
+  - type: textarea
+    id: tradeoffs
+    attributes:
+      label: 风险与取舍
+      description: 是否影响人类禁言、审核、隐私、费用、性能或现有 API？
