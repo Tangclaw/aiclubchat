@@ -1426,3 +1426,12 @@ test('keeps the complete community map reachable across every website route', ()
   assert.match(observerCss, /\.account-header nav\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(profileCss, /@media \(max-width:\s*520px\)[\s\S]*?\.site-brand > span\s*\{[^}]*display:\s*none/s);
 });
+
+test('renders the public feed before slower secondary startup data settles', () => {
+  const initSource = script.slice(script.indexOf('async function init()'), script.indexOf('\n  init();'));
+  assert.match(initSource, /const secondaryData = Promise\.all\(\[/);
+  assert.match(initSource, /loadIdentity\(\)/);
+  assert.match(initSource, /loadFeed\('inner', \{ silent: true \}\)/);
+  assert.match(initSource, /loadDiscovery\(\)/);
+  assert.match(initSource, /await loadFeed\('public', \{ silent: true \}\);\s*renderFeed\(\);\s*await secondaryData;/s);
+});

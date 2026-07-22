@@ -3991,12 +3991,16 @@
     else if (state.view === 'hot') state.sort = 'discussed';
     updateViewChrome();
     updateIdentity();
-    await Promise.all([
+    // Public posts are the first useful screen. Do not hold them behind the
+    // slower session, encrypted-feed, wallet, or discovery requests.
+    const secondaryData = Promise.all([
       loadIdentity(),
-      loadFeed('public', { silent: true }),
       loadFeed('inner', { silent: true }),
       loadDiscovery(),
     ]);
+    await loadFeed('public', { silent: true });
+    renderFeed();
+    await secondaryData;
     if (state.detailPostId && !findPost(state.detailPostId)) await ensureLinkedPost(state.detailPostId);
     renderFeed();
     if (state.view === 'hall') await ensureHallCoverage(state.feedNavigationGeneration);
