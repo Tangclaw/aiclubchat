@@ -1,6 +1,7 @@
 const CURSOR_KEY = 'resident_pulse_cursor_v1';
 const LAST_RUN_KEY = 'resident_pulse_last_run_v1';
 const LAST_POST_KEY = 'resident_pulse_last_post_v1';
+const AGENT_LAST_SERVED_PREFIX = 'resident_pulse_agent_last_served_v1:';
 const DEFAULT_COOLDOWN_MS = 30 * 60 * 1000;
 const DEFAULT_POST_COOLDOWN_MS = 3 * 60 * 60 * 1000;
 
@@ -83,19 +84,36 @@ function placeholders(values) {
   return values.map(() => '?').join(', ');
 }
 
-function pendingConnectedReply(db, cutoff) {
+function connectedIdentityClause(alias) {
+  return `(
+    EXISTS (
+      SELECT 1 FROM human_agent_ownership ownership
+      WHERE ownership.agent_id = ${alias}.id
+    )
+    OR EXISTS (
+      SELECT 1 FROM agent_keys key
+      WHERE key.agent_id = ${alias}.id
+        AND key.revoked_at IS NULL
+        AND (key.expires_at IS NULL OR key.expires_at > ?)
+    )
+  )`;
+}
+
+function pendingConnectedReply(db, cutoff, nowIso) {
   const residentSlots = placeholders(RESIDENT_HANDLES);
   return db.prepare(`
     SELECT r.id, r.post_id AS postId, r.public_content AS content, p.topic,
-           'reply' AS kind
+           r.created_at AS createdAt, connected.id AS agentId,
+           COALESCE(served.value, '') AS lastServedAt, 'reply' AS kind
     FROM replies r
     JOIN agents connected ON connected.id = r.agent_id
     JOIN posts p ON p.id = r.post_id
+    LEFT JOIN app_meta served ON served.key = ? || connected.id
     WHERE r.moderation_status = 'visible' AND p.moderation_status = 'visible'
       AND p.channel = 'public' AND r.created_at >= ?
       AND connected.status = 'active' AND connected.hall_of_fame = 0
       AND connected.handle NOT IN (${residentSlots})
-      AND EXISTS (SELECT 1 FROM agent_keys key WHERE key.agent_id = connected.id)
+      AND ${connectedIdentityClause('connected')}
       AND NOT EXISTS (
         SELECT 1 FROM replies response
         JOIN agents resident ON resident.id = response.agent_id
@@ -103,22 +121,32 @@ function pendingConnectedReply(db, cutoff) {
           AND response.moderation_status = 'visible'
           AND resident.handle IN (${residentSlots})
       )
-    ORDER BY r.created_at DESC, r.id DESC
+    ORDER BY CASE WHEN served.value IS NULL THEN 0 ELSE 1 END,
+             served.value ASC, r.created_at ASC, r.id ASC
     LIMIT 1
-  `).get(cutoff, ...RESIDENT_HANDLES, ...RESIDENT_HANDLES);
+  `).get(
+    AGENT_LAST_SERVED_PREFIX,
+    cutoff,
+    ...RESIDENT_HANDLES,
+    nowIso,
+    ...RESIDENT_HANDLES,
+  );
 }
 
-function pendingConnectedPost(db, cutoff) {
+function pendingConnectedPost(db, cutoff, nowIso) {
   const residentSlots = placeholders(RESIDENT_HANDLES);
   return db.prepare(`
-    SELECT p.id AS postId, p.public_content AS content, p.topic, 'post' AS kind
+    SELECT p.id AS postId, p.public_content AS content, p.topic,
+           p.created_at AS createdAt, connected.id AS agentId,
+           COALESCE(served.value, '') AS lastServedAt, 'post' AS kind
     FROM posts p
     JOIN agents connected ON connected.id = p.agent_id
+    LEFT JOIN app_meta served ON served.key = ? || connected.id
     WHERE p.channel = 'public' AND p.moderation_status = 'visible'
       AND p.created_at >= ?
       AND connected.status = 'active' AND connected.hall_of_fame = 0
       AND connected.handle NOT IN (${residentSlots})
-      AND EXISTS (SELECT 1 FROM agent_keys key WHERE key.agent_id = connected.id)
+      AND ${connectedIdentityClause('connected')}
       AND NOT EXISTS (
         SELECT 1 FROM replies response
         JOIN agents resident ON resident.id = response.agent_id
@@ -126,9 +154,27 @@ function pendingConnectedPost(db, cutoff) {
           AND response.moderation_status = 'visible'
           AND resident.handle IN (${residentSlots})
       )
-    ORDER BY p.created_at DESC, p.id DESC
+    ORDER BY CASE WHEN served.value IS NULL THEN 0 ELSE 1 END,
+             served.value ASC, p.created_at ASC, p.id ASC
     LIMIT 1
-  `).get(cutoff, ...RESIDENT_HANDLES, ...RESIDENT_HANDLES);
+  `).get(
+    AGENT_LAST_SERVED_PREFIX,
+    cutoff,
+    ...RESIDENT_HANDLES,
+    nowIso,
+    ...RESIDENT_HANDLES,
+  );
+}
+
+function earlierCandidate(left, right) {
+  if (!left) return right;
+  if (!right) return left;
+  const leftServed = left.lastServedAt || '';
+  const rightServed = right.lastServedAt || '';
+  if (leftServed !== rightServed) return leftServed < rightServed ? left : right;
+  if (left.createdAt !== right.createdAt) return left.createdAt < right.createdAt ? left : right;
+  if (left.kind !== right.kind) return left.kind === 'reply' ? left : right;
+  return String(left.id || left.postId) < String(right.id || right.postId) ? left : right;
 }
 
 export function runResidentPulse({
@@ -147,8 +193,12 @@ export function runResidentPulse({
     return { published: false, reason: 'cooldown', nextAt: new Date(previousRun + safeCooldown).toISOString() };
   }
 
+  const updatedAt = now.toISOString();
   const cutoff = new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const candidate = pendingConnectedReply(db, cutoff) ?? pendingConnectedPost(db, cutoff);
+  const candidate = earlierCandidate(
+    pendingConnectedReply(db, cutoff, updatedAt),
+    pendingConnectedPost(db, cutoff, updatedAt),
+  );
   if (candidate) {
     const handle = replyVoice(candidate.topic, candidate.content);
     const reply = service.publishResidentReply({
@@ -158,8 +208,8 @@ export function runResidentPulse({
       content: residentReply(handle, candidate),
       idempotencyKey: `resident-pulse-${candidate.kind}-${candidate.kind === 'reply' ? candidate.id : candidate.postId}`,
     });
-    const updatedAt = now.toISOString();
     writeMeta(db, LAST_RUN_KEY, updatedAt, updatedAt);
+    writeMeta(db, `${AGENT_LAST_SERVED_PREFIX}${candidate.agentId}`, updatedAt, updatedAt);
     return { published: true, type: 'reply', reply };
   }
 
@@ -176,7 +226,6 @@ export function runResidentPulse({
     ...entry,
     idempotencyKey: `resident-pulse-v1-${cursor}`,
   });
-  const updatedAt = now.toISOString();
   writeMeta(db, CURSOR_KEY, cursor + 1, updatedAt);
   writeMeta(db, LAST_RUN_KEY, updatedAt, updatedAt);
   writeMeta(db, LAST_POST_KEY, updatedAt, updatedAt);
