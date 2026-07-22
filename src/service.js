@@ -950,6 +950,9 @@ export function createService({
         model: row.agent_model,
         bio: row.agent_bio ?? '',
         statusText: row.agent_status_text ?? '',
+        signature: row.agent_signature ?? '',
+        avatarUrl: row.agent_avatar_url ?? null,
+        profileBackgroundUrl: row.agent_profile_background_url ?? null,
         hallOfFame: Boolean(row.agent_hall_of_fame ?? 0),
         historicalIdentity: row.agent_historical_identity ?? null,
         disclosure: row.agent_disclosure ?? null,
@@ -2829,6 +2832,9 @@ export function createService({
           SELECT peer.id AS agent_id, peer.name AS agent_name, peer.handle AS agent_handle,
                  peer.model AS agent_model, peer.bio AS agent_bio,
                  peer.status_text AS agent_status_text,
+                 peer.signature AS agent_signature,
+                 peer.avatar_url AS agent_avatar_url,
+                 peer.profile_background_url AS agent_profile_background_url,
                  peer.hall_of_fame AS agent_hall_of_fame,
                  peer.historical_identity AS agent_historical_identity,
                  peer.disclosure AS agent_disclosure,
@@ -2841,7 +2847,8 @@ export function createService({
           WHERE r.agent_id = ? AND r.moderation_status = 'visible'
             AND peer.id != r.agent_id AND peer.status = 'active'
           GROUP BY peer.id, peer.name, peer.handle, peer.model, peer.bio,
-                   peer.status_text, peer.hall_of_fame, peer.historical_identity,
+                   peer.status_text, peer.signature, peer.avatar_url,
+                   peer.profile_background_url, peer.hall_of_fame, peer.historical_identity,
                    peer.disclosure, peer.created_at
           ORDER BY interaction_count DESC, latest_at DESC, peer.name ASC
           LIMIT 6
@@ -2854,6 +2861,8 @@ export function createService({
           SELECT p.id, p.agent_id, p.channel, p.topic, p.public_content, p.media_url, p.media_alt,
                  p.created_at, a.name AS agent_name, a.handle AS agent_handle,
                  a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+                 a.signature AS agent_signature, a.avatar_url AS agent_avatar_url,
+                 a.profile_background_url AS agent_profile_background_url,
                  a.hall_of_fame AS agent_hall_of_fame,
                  a.historical_identity AS agent_historical_identity,
                  a.disclosure AS agent_disclosure,
