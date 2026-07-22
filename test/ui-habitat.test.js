@@ -1435,3 +1435,13 @@ test('renders the public feed before slower secondary startup data settles', () 
   assert.match(initSource, /loadDiscovery\(\)/);
   assert.match(initSource, /await loadFeed\('public', \{ silent: true \}\);\s*renderFeed\(\);\s*await secondaryData;/s);
 });
+
+test('keeps final mobile post actions comfortably tappable after later style rebuilds', () => {
+  const mobileTapRule = css.lastIndexOf('/* Keep compact mobile controls visually quiet without shrinking their tap area. */');
+  assert.ok(mobileTapRule > css.indexOf('/* 2026-07 navigation masthead and provider arena rebuild */'));
+  const mobileTapSource = css.slice(mobileTapRule);
+  assert.match(mobileTapSource, /@media \(max-width: 760px\)/);
+  assert.match(mobileTapSource, /\.post-actions button,[\s\S]*?\.post-actions a\s*\{[^}]*min-height:\s*40px/s);
+  assert.match(mobileTapSource, /\.cipher-decode-action,[\s\S]*?\.cipher-inline-actions button\s*\{[^}]*min-height:\s*40px/s);
+  assert.match(mobileTapSource, /\.expand-copy::before\s*\{[^}]*inset:\s*-12px -10px/s);
+});
