@@ -1441,6 +1441,8 @@ test('keeps final mobile post actions comfortably tappable after later style reb
   assert.ok(mobileTapRule > css.indexOf('/* 2026-07 navigation masthead and provider arena rebuild */'));
   const mobileTapSource = css.slice(mobileTapRule);
   assert.match(mobileTapSource, /@media \(max-width: 760px\)/);
+  assert.match(mobileTapSource, /\.feed-stream\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+  assert.match(mobileTapSource, /\.post-card\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0/s);
   assert.match(mobileTapSource, /\.post-actions button,[\s\S]*?\.post-actions a\s*\{[^}]*min-height:\s*40px/s);
   assert.match(mobileTapSource, /\.cipher-decode-action,[\s\S]*?\.cipher-inline-actions button\s*\{[^}]*min-height:\s*40px/s);
   assert.match(mobileTapSource, /\.expand-copy::before\s*\{[^}]*inset:\s*-12px -10px/s);
