@@ -1075,8 +1075,14 @@ test('keeps phone profiles compact and previews only one reply before the full t
   assert.match(tabletProfileCss, /\.hero-body\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:/s);
   assert.match(tabletProfileCss, /\.profile-layout\s*\{[^}]*margin-top:\s*20px/s);
   assert.match(phoneProfileCss, /\.identity-cover\s*\{[^}]*min-height:\s*96px/s);
+  assert.match(phoneProfileCss, /\.cover-label\s*\{[^}]*display:\s*none/s);
+  assert.match(phoneProfileCss, /\.cover-handle\s*\{[^}]*display:\s*none/s);
+  assert.match(phoneProfileCss, /\.identity-cover\.has-custom-cover::after\s*\{[^}]*opacity:\s*\.12/s);
   assert.match(phoneProfileCss, /\.hero-body\s*\{[^}]*display:\s*flow-root/s);
-  assert.match(phoneProfileCss, /\.profile-stats\s*\{[^}]*grid-template-columns:\s*repeat\(5, minmax\(0, 1fr\)\)/s);
+  assert.match(phoneProfileCss, /\.profile-stats\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/s);
+  assert.match(phoneProfileCss, /\.profile-stats dt\s*\{[^}]*white-space:\s*normal/s);
+  assert.match(phoneProfileCss, /\.follow-agent, \.share-profile\s*\{[^}]*min-height:\s*40px/s);
+  assert.match(phoneProfileCss, /\.profile-tabs button\s*\{[^}]*min-height:\s*40px/s);
   assert.match(phoneProfileCss, /\.timeline-heading\s*\{[^}]*display:\s*flex/s);
   assert.doesNotMatch(phoneProfileCss, /grid-template-columns:\s*repeat\(2, 1fr\)/);
 });
@@ -1195,14 +1201,21 @@ test('makes one-click agent connection the default without collecting provider k
 });
 
 test('makes owned agent avatar and background management explicit on the account page', () => {
-  assert.match(observerHtml, /我的智能体/);
-  assert.match(observerScript, /主页外观与资料/);
-  assert.match(observerScript, /更换头像/);
-  assert.match(observerScript, /更换主页背景/);
+  assert.match(observerHtml, /data-i18n="ownedAgentsTitle"/);
+  assert.match(observerHtml, /data-i18n="ownedAgentCreateSubmit"/);
+  assert.match(observerScript, /'ownedAgentEditProfile'/);
+  assert.match(observerScript, /t\(isAvatar \? 'ownedAgentChangeAvatar' : 'ownedAgentChangeBackground'\)/);
+  assert.match(observerScript, /if \(state\.credentialRegistration\) showCredentialPackage\(state\.credentialRegistration\)/);
+  for (const key of ['ownedAgentsTitle:', 'ownedAgentEditProfile:', 'ownedAgentChangeAvatar:', 'ownedAgentHandoffExpiry:']) {
+    assert.equal((i18nScript.match(new RegExp(key, 'g')) || []).length, 3);
+  }
   assert.match(observerScript, /owned-agent-cover/);
   assert.match(observerScript, /aria-controls/);
+  assert.doesNotMatch(observerScript, /\p{Script=Han}/u);
+  assert.match(observerScript, /article\.append\(cover, avatar, body\);\s*\n\s*if \(state\.editingAgentId === agent\.id\) article\.append\(renderOwnedAgentEditor\(agent\)\)/);
   assert.match(observerCss, /\.owned-agent-cover\s*\{[^}]*height:\s*82px/s);
   assert.match(observerCss, /\.owned-agent-avatar\s*\{[^}]*margin-top:\s*-25px/s);
+  assert.match(observerCss, /\.owned-agent-editor\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
   assert.match(observerCss, /html\[data-theme="dark"\] \.owned-agent-cover::after/);
 });
 
@@ -1406,7 +1419,16 @@ test('keeps the multi-page website continuous without turning it into an app she
   assert.match(siteTransitionsScript, /function restoreIncomingAgentRoute\(\)/);
   assert.match(siteTransitionsScript, /document\.body\.classList\.add\('is-page-scrolling'\)/);
   assert.match(siteTransitionsScript, /document\.body\?\.classList\.remove\('is-page-scrolling'\)/);
+  assert.match(siteTransitionsScript, /const navOffset = nav\.offsetLeft/);
+  assert.match(siteTransitionsScript, /const nextWholeItem = \[\.\.\.nav\.children\]\.reduce/);
+  assert.match(siteTransitionsScript, /nextWholeItem \? nextWholeItem\.offsetLeft - navOffset : minimumLeft/);
   assert.match(observerCss, /body\.is-page-scrolling \.privacy-field i::after[\s\S]*?animation-play-state:\s*paused !important/s);
+  assert.match(agentCss, /\.header-actions \.locale-switch button\s*\{[^}]*min-width:\s*34px[^}]*min-height:\s*40px/s);
+  assert.match(agentCss, /\.primary-nav\s*\{[^}]*padding-inline-end:\s*24px[^}]*border-top:/s);
+  assert.match(observerCss, /\.account-header-actions \.locale-switch\s*\{[^}]*min-height:\s*46px/s);
+  assert.match(observerCss, /\.account-header-actions \.locale-switch button\s*\{[^}]*min-width:\s*34px[^}]*min-height:\s*40px/s);
+  assert.match(observerCss, /\.account-brand small\s*\{\s*display:\s*none/s);
+  assert.match(observerCss, /\.auth-tabs button\s*\{[^}]*min-height:\s*40px/s);
   assert.match(siteTransitionsCss, /#incoming-profile-avatar:not\(\[hidden\]\)[^}]*view-transition-name:\s*aiclub-agent-avatar/s);
   assert.match(siteTransitionsCss, /::view-transition-group\(aiclub-agent-avatar\)[^}]*animation-duration:\s*380ms/s);
   assert.match(profileCss, /\.avatar-skeleton:has\(#incoming-profile-avatar:not\(\[hidden\]\)\)/);
@@ -1425,4 +1447,25 @@ test('keeps the complete community map reachable across every website route', ()
   assert.match(profileCss, /\.site-nav\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(observerCss, /\.account-header nav\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(profileCss, /@media \(max-width:\s*520px\)[\s\S]*?\.site-brand > span\s*\{[^}]*display:\s*none/s);
+});
+
+test('renders the public feed before slower secondary startup data settles', () => {
+  const initSource = script.slice(script.indexOf('async function init()'), script.indexOf('\n  init();'));
+  assert.match(initSource, /const secondaryData = Promise\.all\(\[/);
+  assert.match(initSource, /loadIdentity\(\)/);
+  assert.match(initSource, /loadFeed\('inner', \{ silent: true \}\)/);
+  assert.match(initSource, /loadDiscovery\(\)/);
+  assert.match(initSource, /await loadFeed\('public', \{ silent: true \}\);\s*renderFeed\(\);\s*await secondaryData;/s);
+});
+
+test('keeps final mobile post actions comfortably tappable after later style rebuilds', () => {
+  const mobileTapRule = css.lastIndexOf('/* Keep compact mobile controls visually quiet without shrinking their tap area. */');
+  assert.ok(mobileTapRule > css.indexOf('/* 2026-07 navigation masthead and provider arena rebuild */'));
+  const mobileTapSource = css.slice(mobileTapRule);
+  assert.match(mobileTapSource, /@media \(max-width: 760px\)/);
+  assert.match(mobileTapSource, /\.feed-stream\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+  assert.match(mobileTapSource, /\.post-card\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0/s);
+  assert.match(mobileTapSource, /\.post-actions button,[\s\S]*?\.post-actions a\s*\{[^}]*min-height:\s*40px/s);
+  assert.match(mobileTapSource, /\.cipher-decode-action,[\s\S]*?\.cipher-inline-actions button\s*\{[^}]*min-height:\s*40px/s);
+  assert.match(mobileTapSource, /\.expand-copy::before\s*\{[^}]*inset:\s*-12px -10px/s);
 });

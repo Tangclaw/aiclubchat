@@ -75,6 +75,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .account-header nav::-webkit-scrollbar { display: none; }
 .account-header nav a { flex: 0 0 auto; }
 .account-header-actions { display: flex; align-items: center; justify-self: end; gap: 8px; }
+.account-header-actions .locale-switch { min-height: 46px; padding: 3px; }
+.account-header-actions .locale-switch button { min-width: 34px; min-height: 40px; height: 40px; }
 .account-header nav a, .theme-button { min-height: 38px; display: inline-flex; align-items: center; padding: 0 13px; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 9px; font-size: 12px; font-weight: 700; }
 .account-header nav a:hover, .theme-button:hover { color: var(--ink); background: var(--soft); border-color: var(--line); }
 .account-header nav a[aria-current="page"] { color: var(--ink); background: var(--surface); border-color: var(--line-strong); box-shadow: 0 5px 14px rgba(20, 22, 30, .06); }
@@ -132,7 +134,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .auth-card::after { position: absolute; top: -3px; left: -38%; width: 34%; height: 3px; content: ""; background: linear-gradient(90deg, transparent, color-mix(in srgb, #fff 76%, var(--accent)), transparent); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 36%, transparent)); animation: human-gate-current 6.4s ease-in-out infinite; pointer-events: none; }
 .auth-card:focus-within { border-color: color-mix(in srgb, var(--accent) 62%, var(--line-strong)); box-shadow: 0 22px 58px color-mix(in srgb, var(--accent) 12%, transparent); transform: translateY(-2px); }
 .auth-tabs { display: flex; gap: 4px; margin-bottom: 26px; padding: 4px; background: var(--soft); border: 1px solid var(--line); border-radius: 10px; }
-.auth-tabs button { flex: 1; min-height: 38px; color: var(--muted); background: transparent; border: 0; border-radius: 7px; cursor: pointer; font-weight: 750; transition: color 160ms ease, background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
+.auth-tabs button { flex: 1; min-height: 40px; color: var(--muted); background: transparent; border: 0; border-radius: 7px; cursor: pointer; font-weight: 750; transition: color 160ms ease, background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
 .auth-tabs button[aria-selected="true"] { color: var(--ink); background: var(--surface); box-shadow: 0 6px 16px rgba(20, 22, 30, .06); transform: translateY(-1px); }
 #account-auth-form { display: grid; gap: 14px; margin-top: 24px; }
 #account-auth-form label span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11px; font-weight: 750; }
@@ -201,7 +203,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .owned-agent-card-actions, .owned-agent-editor-actions, .owned-agent-handoff-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .owned-agent-card-actions .quiet-button, .owned-agent-card-actions .danger-button { min-height: 38px; display: inline-flex; align-items: center; padding: 0 12px; font-size: 11px; }
 .owned-agent-rotation-note { margin: 7px 0 0; color: var(--muted); font-size: 9px; }
-.owned-agent-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 17px; padding: 17px; background: color-mix(in srgb, var(--soft) 62%, transparent); border: 1px solid var(--line); border-radius: 12px; }
+.owned-agent-editor { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 17px; padding: 17px; background: color-mix(in srgb, var(--soft) 62%, transparent); border: 1px solid var(--line); border-radius: 12px; }
 .owned-agent-editor label.is-wide { grid-column: 1 / -1; }
 .owned-agent-editor-heading { grid-column: 1 / -1; display: flex; align-items: baseline; justify-content: space-between; color: var(--ink); font-size: 13px; font-weight: 850; letter-spacing: -.02em; }
 .owned-agent-editor-heading.is-appearance { margin-top: 3px; padding-top: 14px; border-top: 1px solid var(--line); }
@@ -344,6 +346,7 @@ html[data-theme="dark"] .membership-card .primary-button:disabled {
   .account-header nav { grid-row: 2; grid-column: 1 / -1; justify-content: flex-start; margin: 0 -14px; padding: 0 14px 8px; overflow-x: auto; }
   .account-header nav a { flex: 0 0 auto; min-height: 40px; }
   .account-brand strong { font-size: 19px; }
+  .account-brand small { display: none; }
   .account-main { width: calc(100% - 24px); padding: 22px 0 48px; }
   .account-intro { display: block; padding-bottom: 18px; }
   .account-intro h1 { font-size: 40px; }
@@ -367,6 +370,10 @@ html[data-theme="dark"] .membership-card .primary-button:disabled {
   .owned-agent-editor label.is-wide { grid-column: auto; }
   .owned-agent-editor-heading, .owned-agent-media-grid, .owned-agent-editor-hint, .owned-agent-editor-actions { grid-column: auto; }
   .owned-agent-editor-heading { display: grid; gap: 3px; }
+  .owned-agent-editor { margin-top: 16px; padding: 14px; }
+  .owned-agent-handoff { padding: 16px; }
+  .owned-agent-handoff h3 { font-size: 18px; line-height: 1.25; }
+  .owned-agent-handoff pre { max-height: 220px; }
   .owned-agent-card { grid-template-columns: 52px minmax(0, 1fr); gap: 0 12px; padding: 0 16px 16px; }
   .owned-agent-cover { height: 70px; margin: 0 -16px; }
   .owned-agent-avatar { width: 52px; height: 52px; margin-top: -18px; border-width: 3px; border-radius: 13px; font-size: 15px; }

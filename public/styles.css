@@ -3607,3 +3607,14 @@ html[data-theme="dark"] .fastlane-scroll button.is-active { box-shadow: inset 0 
   .feed-column:not(.is-detail) .thought-depth { display: none; }
   .feed-column:not(.is-detail) .post-card.is-longform .expand-copy { margin-top: 5px; }
 }
+
+/* Keep compact mobile controls visually quiet without shrinking their tap area. */
+@media (max-width: 760px) {
+  .feed-stream { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+  .post-card { width: 100%; min-width: 0; }
+  .post-actions button,
+  .post-actions a { min-height: 40px; padding-inline: 9px; }
+  .cipher-decode-action,
+  .cipher-inline-actions button { min-height: 40px; }
+  .expand-copy::before { inset: -12px -10px; }
+}

@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 
 import { migrateOnce } from '../database.js';
 import { createHttpHandler } from '../http.js';
+import { runResidentPulse } from '../resident-pulse.js';
 import { seedWorld } from '../seed.js';
 import { createService } from '../service.js';
 import { fetchPublicApi } from './cache.js';
@@ -22,6 +23,12 @@ function encryptionKey(value) {
   return key;
 }
 
+function pulseIntervalMs(value) {
+  const minutes = Number(value);
+  const safeMinutes = Number.isFinite(minutes) ? Math.min(Math.max(minutes, 30), 24 * 60) : 180;
+  return safeMinutes * 60 * 1000;
+}
+
 function assetPath(pathname) {
   if (pathname === '/') return '/index.html';
   if (pathname === '/agent' || pathname === '/agent/') return '/agent.html';
@@ -35,6 +42,7 @@ function assetPath(pathname) {
 export class AIClubState extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.ctx = ctx;
 
     const database = migrateOnce(createDurableDatabase(ctx.storage, {
       onQuery({ statement, rowsRead, rowsWritten }) {
@@ -54,6 +62,10 @@ export class AIClubState extends DurableObject {
       keyPepper: env.AI_KEY_PEPPER,
       aiInviteSecret: env.AI_INVITE_SECRET,
     });
+    this.service = service;
+    this.pulseEnabled = booleanValue(env.RESIDENT_PULSE_ENABLED, false);
+    this.pulseInterval = pulseIntervalMs(env.RESIDENT_PULSE_MINUTES);
+    this.pulsePostInterval = pulseIntervalMs(env.RESIDENT_PULSE_POST_MINUTES);
 
     if (booleanValue(env.SEED_CURATED_CONTENT, true)) {
       seedWorld({ service, db: database, aiInviteSecret: env.AI_INVITE_SECRET });
@@ -71,6 +83,14 @@ export class AIClubState extends DurableObject {
       trustProxy: true,
     }));
     this.nodeHandler = httpServerHandler(server);
+
+    if (this.pulseEnabled) {
+      ctx.blockConcurrencyWhile(async () => {
+        if (await ctx.storage.getAlarm() === null) {
+          await ctx.storage.setAlarm(Date.now() + Math.min(this.pulseInterval, 15 * 60 * 1000));
+        }
+      });
+    }
   }
 
   async fetch(request) {
@@ -91,6 +111,36 @@ export class AIClubState extends DurableObject {
       }
     }
     return response;
+  }
+
+  async alarm() {
+    if (!this.pulseEnabled) return;
+    try {
+      const result = runResidentPulse({
+        service: this.service,
+        db: this.database,
+        date: new Date(),
+        cooldownMs: this.pulseInterval,
+        postCooldownMs: this.pulsePostInterval,
+      });
+      console.log(JSON.stringify({
+        event: 'resident.pulse',
+        published: result.published,
+        type: result.type ?? null,
+        agent: result.post?.agent?.handle ?? result.reply?.agent?.handle ?? null,
+        postId: result.post?.id ?? null,
+        replyId: result.reply?.id ?? null,
+        reason: result.reason ?? null,
+      }));
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: 'resident.pulse.failed',
+        message: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      const jitter = Math.floor(Math.random() * Math.min(this.pulseInterval * 0.18, 10 * 60 * 1000));
+      await this.ctx.storage.setAlarm(Date.now() + this.pulseInterval + jitter);
+    }
   }
 }
 

@@ -25,7 +25,16 @@
       if (currentRect.left < navRect.left + inlinePadding) {
         delta = currentRect.left - navRect.left - inlinePadding;
       } else if (currentRect.right > navRect.right - inlinePadding) {
-        delta = currentRect.right - navRect.right + inlinePadding;
+        const navOffset = nav.offsetLeft;
+        const minimumLeft = current.offsetLeft - navOffset + current.offsetWidth - nav.clientWidth + inlinePadding;
+        const nextWholeItem = [...nav.children].reduce((nearest, item) => {
+          if (!nearest) return item;
+          const itemDistance = Math.abs(item.offsetLeft - navOffset - minimumLeft);
+          const nearestDistance = Math.abs(nearest.offsetLeft - navOffset - minimumLeft);
+          return itemDistance < nearestDistance ? item : nearest;
+        }, null);
+        const targetLeft = Math.max(0, nextWholeItem ? nextWholeItem.offsetLeft - navOffset : minimumLeft);
+        delta = targetLeft - nav.scrollLeft;
       }
       if (delta) nav.scrollTo({ left: nav.scrollLeft + delta, behavior: 'auto' });
     });

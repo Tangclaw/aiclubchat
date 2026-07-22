@@ -238,9 +238,10 @@ describe('readonly city HTTP authorization boundary', () => {
     });
     assert.equal(registration.response.status, 201);
     assert.equal(registration.json.quick, true);
-    assert.match(registration.json.agent.name, /^NODE-[A-F0-9]{6}$/);
-    assert.match(registration.json.agent.handle, /^@node_[a-f0-9]{6}$/);
+    assert.match(registration.json.agent.name, /^[\p{Script=Han}]+(?:·\d+)?$/u);
+    assert.match(registration.json.agent.handle, /^@[a-z]+_[a-z]+(?:_\d+)?$/);
     assert.equal(registration.json.agent.model, 'Autonomous Agent');
+    assert.match(registration.json.agent.avatarUrl, /^\/assets\/avatars\/[a-z]+\.svg$/);
     assert.match(registration.json.apiKey, /^aiclub_ai_/);
     assert.deepEqual(registration.json.scopes, AGENT_CREDENTIAL_SCOPES);
     assert.match(registration.json.expiresAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
@@ -1037,6 +1038,15 @@ describe('readonly city HTTP authorization boundary', () => {
     });
     assert.equal(created.response.status, 201);
     const agentId = created.json.agent.id;
+    const authored = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${created.json.apiKey}`,
+        'idempotency-key': 'binary-media-avatar-post',
+      },
+      body: { channel: 'public', topic: '头像测试', content: '这条帖子应该始终使用主页当前生效的头像。' },
+    });
+    assert.equal(authored.response.status, 201);
     const tinyPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
     const submission = await request(`/api/me/agents/${agentId}/media`, {
       method: 'POST',
@@ -1062,7 +1072,7 @@ describe('readonly city HTTP authorization boundary', () => {
     );
 
     const beforeReview = await request('/api/me/agents', { cookie: owner.cookie });
-    assert.equal(beforeReview.json.agents[0].avatarUrl, null);
+    assert.equal(beforeReview.json.agents[0].avatarUrl, created.json.agent.avatarUrl);
     assert.equal(beforeReview.json.agents[0].pendingMedia[0].id, submission.json.id);
 
     const approved = await request(`/api/admin/media/${submission.json.id}/review`, {
@@ -1075,6 +1085,22 @@ describe('readonly city HTTP authorization boundary', () => {
     const afterReview = await request('/api/me/agents', { cookie: owner.cookie });
     assert.equal(afterReview.json.agents[0].avatarUrl, submission.json.url);
     assert.equal(afterReview.json.agents[0].pendingMedia.length, 0);
+    const publicProfile = await request(`/api/agents/${created.json.agent.handle.slice(1)}`);
+    assert.equal(publicProfile.response.status, 200);
+    assert.equal(publicProfile.json.agent.avatarUrl, submission.json.url);
+    assert.equal(publicProfile.json.posts[0].agent.avatarUrl, submission.json.url);
+    const publicFeed = await request('/api/feed?view=public');
+    assert.equal(publicFeed.response.status, 200);
+    const publicFeedPost = publicFeed.json.posts.find((post) => post.id === authored.json.post.id);
+    assert.ok(publicFeedPost);
+    assert.equal(publicFeedPost.agent.avatarUrl, submission.json.url);
+    const agentFeed = await request('/api/ai/feed?channel=public&limit=20', {
+      headers: { authorization: `Bearer ${created.json.apiKey}` },
+    });
+    assert.equal(agentFeed.response.status, 200);
+    const agentFeedPost = agentFeed.json.posts.find((post) => post.id === authored.json.post.id);
+    assert.ok(agentFeedPost);
+    assert.equal(agentFeedPost.agent.avatarUrl, submission.json.url);
     const approvedMedia = await fetch(`${baseUrl}${submission.json.url}`);
     assert.match(approvedMedia.headers.get('cache-control'), /immutable/);
   });

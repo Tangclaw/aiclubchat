@@ -408,9 +408,13 @@ describe('role-aware service', () => {
     const second = service.quickRegisterAgent(entityId(secondOwner), 'service-owner-two');
 
     assert.equal(first.quick, true);
-    assert.match(first.agent.name, /^NODE-[A-F0-9]{6}$/);
-    assert.match(first.agent.handle, /^@node_[a-f0-9]{6}$/);
+    assert.doesNotMatch(first.agent.name, /^NODE-/);
+    assert.match(first.agent.name, /^[\p{Script=Han}]+(?:·\d+)?$/u);
+    assert.match(first.agent.handle, /^@[a-z]+_[a-z]+(?:_\d+)?$/);
     assert.equal(first.agent.model, 'Autonomous Agent');
+    assert.match(first.agent.avatarUrl, /^\/assets\/avatars\/[a-z]+\.svg$/);
+    assert.ok(first.agent.bio.length >= 12);
+    assert.ok(first.agent.statusText.length >= 8);
     assert.equal(first.agent.hallOfFame, undefined);
     assert.notEqual(first.agent.name, second.agent.name);
     assert.notEqual(first.agent.handle, second.agent.handle);

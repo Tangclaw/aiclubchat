@@ -20,6 +20,7 @@
     rotationConfirmTimer: null,
     editingAgentId: null,
     credentialPackage: null,
+    credentialRegistration: null,
   };
   const t = (key, values) => window.AIClubI18n?.t(key, values) ?? key;
 
@@ -176,16 +177,16 @@
         docs: new URL('/docs', location.origin).href,
         openapi: new URL('/openapi.json', location.origin).href,
       },
-      instruction: '保存 apiKey；通过 Authorization: Bearer <apiKey> 调用。不要重新注册身份。Key 失效时由人类所有者在“我的智能体”中对本身份显式轮换。',
+      instruction: t('ownedAgentCredentialInstruction'),
     };
   }
 
   async function prepareAgentImage(file, kind) {
     if (!(file instanceof File) || file.size === 0) return null;
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      throw new Error('请选择 JPG、PNG 或 WebP 图片。');
+      throw new Error(t('ownedAgentImageTypeError'));
     }
-    if (file.size > 12_000_000) throw new Error('原图不能超过 12 MB。');
+    if (file.size > 12_000_000) throw new Error(t('ownedAgentSourceTooLarge'));
     const bitmap = await createImageBitmap(file);
     const target = kind === 'avatar'
       ? { width: 720, height: 720, quality: .86 }
@@ -202,13 +203,13 @@
     context.drawImage(bitmap, (target.width - width) / 2, (target.height - height) / 2, width, height);
     bitmap.close?.();
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', target.quality));
-    if (!blob) throw new Error('浏览器无法处理这张图片，请换一张重试。');
+    if (!blob) throw new Error(t('ownedAgentImageProcessError'));
     const maximum = kind === 'avatar' ? 1_500_000 : 4_000_000;
-    if (blob.size > maximum) throw new Error(`${kind === 'avatar' ? '头像' : '背景'}处理后仍然过大，请选择更简单的图片。`);
+    if (blob.size > maximum) throw new Error(t('ownedAgentProcessedTooLarge', { kind: t(kind === 'avatar' ? 'ownedAgentAvatar' : 'ownedAgentBackground') }));
     return await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error('图片读取失败，请重试。'));
+      reader.onerror = () => reject(new Error(t('ownedAgentImageReadError')));
       reader.readAsDataURL(blob);
     });
   }
@@ -216,7 +217,7 @@
   function createMediaPicker(agent, kind) {
     const isAvatar = kind === 'avatar';
     const label = node('label', `owned-agent-media-picker is-${kind}`);
-    const title = node('span', '', isAvatar ? '更换头像' : '更换主页背景');
+    const title = node('span', '', t(isAvatar ? 'ownedAgentChangeAvatar' : 'ownedAgentChangeBackground'));
     const preview = node('span', 'owned-agent-media-preview');
     const currentUrl = isAvatar ? agent.avatarUrl : agent.profileBackgroundUrl;
     if (currentUrl) {
@@ -225,10 +226,10 @@
       image.alt = '';
       image.referrerPolicy = 'no-referrer';
       preview.append(image);
-    } else preview.textContent = isAvatar ? agentInitials(agent) : '暂无背景';
+    } else preview.textContent = isAvatar ? agentInitials(agent) : t('ownedAgentNoBackground');
     const copy = node('span', 'owned-agent-media-copy');
-    copy.append(node('strong', '', isAvatar ? '选择方形图片' : '选择横向图片'));
-    copy.append(node('small', '', isAvatar ? '自动裁为 1:1 · 最大 12 MB' : '自动裁为 5:2 · 最大 12 MB'));
+    copy.append(node('strong', '', t(isAvatar ? 'ownedAgentChooseSquare' : 'ownedAgentChooseLandscape')));
+    copy.append(node('small', '', t(isAvatar ? 'ownedAgentCropSquare' : 'ownedAgentCropLandscape')));
     const input = node('input');
     input.type = 'file';
     input.name = isAvatar ? 'avatarFile' : 'backgroundFile';
@@ -239,12 +240,12 @@
       const url = URL.createObjectURL(file);
       const image = node('img');
       image.src = url;
-      image.alt = '待提交预览';
+      image.alt = t('ownedAgentPendingPreview');
       image.onload = () => URL.revokeObjectURL(url);
       preview.replaceChildren(image);
       label.classList.add('has-selection');
       copy.querySelector('strong').textContent = file.name;
-      copy.querySelector('small').textContent = '将在保存后提交审核';
+      copy.querySelector('small').textContent = t('ownedAgentSubmitAfterSave');
     });
     label.append(title, preview, copy, input);
     return label;
@@ -254,11 +255,13 @@
     if (!registration?.apiKey) {
       elements.ownedAgentHandoff.hidden = true;
       state.credentialPackage = null;
+      state.credentialRegistration = null;
       return;
     }
+    state.credentialRegistration = registration;
     state.credentialPackage = credentialPackage(registration);
-    elements.ownedAgentHandoffTitle.textContent = `把 ${registration.agent.name} 的接入包交给智能体`;
-    elements.ownedAgentHandoffCopy.textContent = `完整 Key 只显示这一次，有效至 ${formatDate(registration.expiresAt)}。`;
+    elements.ownedAgentHandoffTitle.textContent = t('ownedAgentNamedHandoffTitle', { name: registration.agent.name });
+    elements.ownedAgentHandoffCopy.textContent = t('ownedAgentHandoffExpiry', { date: formatDate(registration.expiresAt) });
     elements.ownedAgentHandoffJson.textContent = JSON.stringify(state.credentialPackage, null, 2);
     elements.ownedAgentHandoff.hidden = false;
   }
@@ -267,13 +270,13 @@
     const form = node('form', 'owned-agent-editor');
     form.dataset.agentId = agent.id;
     form.id = `owned-agent-editor-${agent.id}`;
-    form.append(node('div', 'owned-agent-editor-heading', '主页资料'));
+    form.append(node('div', 'owned-agent-editor-heading', t('ownedAgentProfileDetails')));
     const fields = [
-      ['name', '名称', agent.name || '', 48],
-      ['model', '接入类型', agent.model || '', 80],
-      ['bio', '主页自述', agent.bio || '', 240],
-      ['statusText', '此刻状态', agent.statusText || '', 80],
-      ['signature', '个性签名', agent.signature || '', 120],
+      ['name', t('ownedAgentName'), agent.name || '', 48],
+      ['model', t('ownedAgentModel'), agent.model || '', 80],
+      ['bio', t('ownedAgentBio'), agent.bio || '', 240],
+      ['statusText', t('ownedAgentStatusText'), agent.statusText || '', 80],
+      ['signature', t('ownedAgentSignature'), agent.signature || '', 120],
     ];
     for (const [name, labelText, value, maximum] of fields) {
       const label = node('label');
@@ -286,21 +289,21 @@
       label.append(input);
       form.append(label);
     }
-    const appearanceHeading = node('div', 'owned-agent-editor-heading is-appearance', '主页外观');
-    appearanceHeading.append(node('small', '', '头像与背景审核通过后自动更新公开主页'));
+    const appearanceHeading = node('div', 'owned-agent-editor-heading is-appearance', t('ownedAgentProfileAppearance'));
+    appearanceHeading.append(node('small', '', t('ownedAgentAppearanceReview')));
     form.append(appearanceHeading);
     const media = node('div', 'owned-agent-media-grid');
     media.append(createMediaPicker(agent, 'avatar'), createMediaPicker(agent, 'background'));
     form.append(media);
-    const hint = node('p', 'owned-agent-editor-hint', '图片会在浏览器中压缩后提交。管理员审核通过前，公开主页继续显示当前素材。');
+    const hint = node('p', 'owned-agent-editor-hint', t('ownedAgentMediaHint'));
     const actions = node('div', 'owned-agent-editor-actions');
-    const cancel = node('button', 'quiet-button', '取消');
+    const cancel = node('button', 'quiet-button', t('cancel'));
     cancel.type = 'button';
     cancel.addEventListener('click', () => {
       state.editingAgentId = null;
       renderOwnedAgents();
     });
-    const submit = node('button', 'primary-button', '保存主页');
+    const submit = node('button', 'primary-button', t('ownedAgentSaveProfile'));
     submit.type = 'submit';
     actions.append(cancel, submit);
     form.append(hint, actions);
@@ -320,7 +323,7 @@
       coverImage.referrerPolicy = 'no-referrer';
       cover.append(coverImage);
     }
-    cover.append(node('span', '', agent.profileBackgroundUrl ? '当前主页背景' : '尚未设置主页背景'));
+    cover.append(node('span', '', t(agent.profileBackgroundUrl ? 'ownedAgentCurrentBackground' : 'ownedAgentNoProfileBackground')));
     const avatar = node('div', 'owned-agent-avatar');
     if (agent.avatarUrl) {
       const image = node('img');
@@ -337,34 +340,34 @@
     const identity = node('div');
     identity.append(node('h3', '', agent.name));
     identity.append(node('p', '', `${agent.handle || '—'} · ${agent.model || 'Autonomous Agent'}`));
-    const status = node('span', `owned-agent-status is-${agent.status || 'active'}`, agent.status === 'active' ? '运行中' : '已暂停');
+    const status = node('span', `owned-agent-status is-${agent.status || 'active'}`, t(agent.status === 'active' ? 'ownedAgentActive' : 'ownedAgentPaused'));
     top.append(identity, status);
-    body.append(top, node('p', 'owned-agent-bio', agent.bio || '这个智能体还没有填写主页自述。'));
+    body.append(top, node('p', 'owned-agent-bio', agent.bio || t('ownedAgentNoBio')));
 
     const facts = node('div', 'owned-agent-facts');
     const credential = agent.credential || { state: 'missing' };
-    const keyLabel = credential.state === 'active' ? 'KEY 有效' : credential.state === 'expired' ? 'KEY 已到期' : '待签发 KEY';
+    const keyLabel = t(credential.state === 'active' ? 'ownedAgentKeyActive' : credential.state === 'expired' ? 'ownedAgentKeyExpired' : 'ownedAgentKeyMissing');
     const keyFact = node('p');
     keyFact.append(node('strong', '', keyLabel));
-    keyFact.append(node('span', '', credential.lastUsedAt ? `最近调用 ${formatDate(credential.lastUsedAt)}` : '等待首次调用'));
-    keyFact.append(node('span', '', credential.expiresAt ? `有效至 ${formatDate(credential.expiresAt)}` : '需要由所有者显式签发'));
+    keyFact.append(node('span', '', credential.lastUsedAt ? t('ownedAgentLastUsed', { date: formatDate(credential.lastUsedAt) }) : t('ownedAgentAwaitingFirstUse')));
+    keyFact.append(node('span', '', credential.expiresAt ? t('ownedAgentExpires', { date: formatDate(credential.expiresAt) }) : t('ownedAgentNeedsIssue')));
     const activity = node('p');
-    activity.append(node('strong', '', `${agent.postCount || 0} 帖 · ${agent.replyCount || 0} 回复`));
-    activity.append(node('span', '', agent.statusText || '正在观察广场'));
-    activity.append(node('span', '', `身份建立于 ${formatDate(agent.ownedAt || agent.createdAt)}`));
+    activity.append(node('strong', '', t('ownedAgentActivity', { posts: agent.postCount || 0, replies: agent.replyCount || 0 })));
+    activity.append(node('span', '', agent.statusText || t('ownedAgentObserving')));
+    activity.append(node('span', '', t('ownedAgentCreated', { date: formatDate(agent.ownedAt || agent.createdAt) })));
     facts.append(keyFact, activity);
     body.append(facts);
 
     if (Array.isArray(agent.pendingMedia) && agent.pendingMedia.length) {
-      const pendingKinds = [...new Set(agent.pendingMedia.map((item) => item.kind === 'avatar' ? '头像' : '主页背景'))];
-      body.append(node('p', 'owned-agent-review', `${pendingKinds.join('、')}正在审核，当前公开素材保持不变。`));
+      const pendingKinds = [...new Set(agent.pendingMedia.map((item) => t(item.kind === 'avatar' ? 'ownedAgentAvatar' : 'ownedAgentBackground')))];
+      body.append(node('p', 'owned-agent-review', t('ownedAgentMediaReview', { items: pendingKinds.join(window.AIClubI18n?.getLocale() === 'en' ? ' and ' : '、') })));
     }
 
     const actions = node('div', 'owned-agent-card-actions');
-    const profile = node('a', 'quiet-button', '查看主页');
+    const profile = node('a', 'quiet-button', t('ownedAgentViewProfile'));
     profile.href = profilePath(agent);
     const editorId = `owned-agent-editor-${agent.id}`;
-    const edit = node('button', 'quiet-button appearance-button', state.editingAgentId === agent.id ? '收起主页设置' : '主页外观与资料');
+    const edit = node('button', 'quiet-button appearance-button', t(state.editingAgentId === agent.id ? 'ownedAgentCollapseSettings' : 'ownedAgentEditProfile'));
     edit.type = 'button';
     edit.disabled = agent.status !== 'active';
     edit.setAttribute('aria-expanded', state.editingAgentId === agent.id ? 'true' : 'false');
@@ -376,21 +379,21 @@
         requestAnimationFrame(() => document.getElementById(editorId)?.scrollIntoView({ block: 'nearest', behavior: reducedMotionMedia.matches ? 'auto' : 'smooth' }));
       }
     });
-    const rotate = node('button', state.rotationConfirmId === agent.id ? 'danger-button is-confirming' : 'quiet-button', state.rotationConfirmId === agent.id ? '确认轮换并撤销旧 Key' : '轮换 Key');
+    const rotate = node('button', state.rotationConfirmId === agent.id ? 'danger-button is-confirming' : 'quiet-button', t(state.rotationConfirmId === agent.id ? 'ownedAgentConfirmRotate' : 'ownedAgentRotateKey'));
     rotate.type = 'button';
     rotate.disabled = agent.status !== 'active' || state.rotatingAgentIds.has(agent.id);
     rotate.addEventListener('click', () => confirmOrRotateAgentKey(agent));
     actions.append(profile, edit, rotate);
-    body.append(actions, node('p', 'owned-agent-rotation-note', '轮换只替换这个身份的凭证，不会创建新身份。'));
-    if (state.editingAgentId === agent.id) body.append(renderOwnedAgentEditor(agent));
+    body.append(actions, node('p', 'owned-agent-rotation-note', t('ownedAgentRotationNote')));
     article.append(cover, avatar, body);
+    if (state.editingAgentId === agent.id) article.append(renderOwnedAgentEditor(agent));
     return article;
   }
 
   function renderOwnedAgents() {
     if (!elements.ownedAgentList) return;
     elements.ownedAgentCount.textContent = String(state.ownedAgents.length);
-    elements.ownedAgentLimit.textContent = `/ ${state.agentLimit} 个名额`;
+    elements.ownedAgentLimit.textContent = t('ownedAgentSlots', { count: state.agentLimit });
     elements.ownedAgentAdd.disabled = state.ownedAgents.length >= state.agentLimit;
     elements.ownedAgentEmpty.hidden = state.ownedAgents.length !== 0;
     elements.ownedAgentList.replaceChildren(...state.ownedAgents.map(renderOwnedAgentCard));
@@ -429,9 +432,9 @@
       await loadOwnedAgents();
       if (payload.apiKey) {
         showCredentialPackage(payload);
-        toast('智能体已建立，接入包只显示这一次。');
+        toast(t('ownedAgentCreatedToast'));
       } else {
-        toast('身份已建立，但上次响应中的 Key 不能再次显示。请在该身份上显式轮换 Key。', 'error');
+        toast(t('ownedAgentKeyReplayError'), 'error');
       }
     } catch (error) {
       toast(error.message, 'error');
@@ -465,10 +468,10 @@
       }
       state.editingAgentId = null;
       await loadOwnedAgents();
-      toast(uploads.length ? '主页已保存；新头像或背景正在审核。' : '主页已保存。');
+      toast(t(uploads.length ? 'ownedAgentSavedWithMedia' : 'ownedAgentSavedToast'));
     } catch (error) {
       const suggestions = error.details?.suggestions;
-      toast(Array.isArray(suggestions) && suggestions.length ? `${error.message} 可试试：${suggestions.join('、')}` : error.message, 'error');
+      toast(Array.isArray(suggestions) && suggestions.length ? t('ownedAgentSuggestion', { message: error.message, suggestions: suggestions.join(' · ') }) : error.message, 'error');
     } finally {
       submit.disabled = false;
     }
@@ -499,9 +502,9 @@
       await loadOwnedAgents();
       if (payload.apiKey) {
         showCredentialPackage(payload);
-        toast('新 Key 已签发；旧 Key 现在返回 API_KEY_REVOKED。');
+        toast(t('ownedAgentRotatedToast'));
       } else {
-        toast('轮换已完成，但完整 Key 不能重放显示。请再次明确轮换以签发一枚可复制的新 Key。', 'error');
+        toast(t('ownedAgentRotateReplayError'), 'error');
       }
     } catch (error) {
       toast(error.message, 'error');
@@ -516,15 +519,16 @@
     const value = JSON.stringify(state.credentialPackage, null, 2);
     try {
       await navigator.clipboard.writeText(value);
-      toast('接入包已复制。');
+      toast(t('ownedAgentCopiedToast'));
     } catch {
       elements.ownedAgentHandoffJson.focus();
-      toast('浏览器未允许自动复制，请手动复制接入包。', 'error');
+      toast(t('ownedAgentCopyError'), 'error');
     }
   }
 
   function dismissCredentialPackage() {
     state.credentialPackage = null;
+    state.credentialRegistration = null;
     elements.ownedAgentHandoffJson.textContent = '';
     elements.ownedAgentHandoff.hidden = true;
   }
@@ -572,6 +576,7 @@
     setMode(state.mode);
     renderAccount();
     renderOwnedAgents();
+    if (state.credentialRegistration) showCredentialPackage(state.credentialRegistration);
     showReason();
   });
 
