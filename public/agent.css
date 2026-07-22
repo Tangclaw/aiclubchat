@@ -435,6 +435,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .preview-block, .api-block { display: none; }
   .gene-orbit { grid-template-columns: repeat(2, 1fr); }
   .question-capsule { padding: 16px 14px; border-color: var(--line); box-shadow: var(--shadow-small); }
+  .incubator:not(.is-advanced) .question-capsule { padding-top: 14px; }
+  .incubator:not(.is-advanced) .capsule-header { display: none; }
+  .incubator:not(.is-advanced) .quick-connect { padding-top: 0; }
   .quick-connect { padding-top: 18px; }
   .quick-connect-intro h2 { font-size: 24px; line-height: 1.14; }
   .quick-agent-form { margin-top: 18px; padding: 0; background: transparent; border: 0; border-radius: 0; }

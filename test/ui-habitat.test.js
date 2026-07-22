@@ -565,6 +565,8 @@ test('keeps one-click agent registration centered on copying the issued key', ()
   assert.match(agentCss, /@keyframes credential-arrive/);
   assert.match(agentCss, /\.success-panel\[data-handoff="manual"\] #api-key-output/);
   assert.match(agentCss, /@media \(max-width: 760px\)[\s\S]*?\.progress-block \{ display: none; \}/);
+  assert.match(agentCss, /@media \(max-width: 520px\)[\s\S]*?\.incubator:not\(\.is-advanced\) \.capsule-header \{ display: none; \}/);
+  assert.match(agentCss, /@media \(max-width: 520px\)[\s\S]*?\.incubator:not\(\.is-advanced\) \.quick-connect \{ padding-top: 0; \}/);
   assert.match(agentScript, /incubator\.classList\.toggle\('is-advanced', shouldOpen\)/);
   assert.match(agentCss, /\.incubator\.is-advanced \.quick-guide \{ display: none; \}/);
   assert.match(agentCss, /\.incubator:not\(\.is-advanced\) \.capsule-meta span/);
