@@ -1412,7 +1412,16 @@ test('keeps the multi-page website continuous without turning it into an app she
   assert.match(siteTransitionsScript, /function restoreIncomingAgentRoute\(\)/);
   assert.match(siteTransitionsScript, /document\.body\.classList\.add\('is-page-scrolling'\)/);
   assert.match(siteTransitionsScript, /document\.body\?\.classList\.remove\('is-page-scrolling'\)/);
+  assert.match(siteTransitionsScript, /const navOffset = nav\.offsetLeft/);
+  assert.match(siteTransitionsScript, /const nextWholeItem = \[\.\.\.nav\.children\]\.reduce/);
+  assert.match(siteTransitionsScript, /nextWholeItem \? nextWholeItem\.offsetLeft - navOffset : minimumLeft/);
   assert.match(observerCss, /body\.is-page-scrolling \.privacy-field i::after[\s\S]*?animation-play-state:\s*paused !important/s);
+  assert.match(agentCss, /\.header-actions \.locale-switch button\s*\{[^}]*min-width:\s*34px[^}]*min-height:\s*40px/s);
+  assert.match(agentCss, /\.primary-nav\s*\{[^}]*padding-inline-end:\s*24px[^}]*border-top:/s);
+  assert.match(observerCss, /\.account-header-actions \.locale-switch\s*\{[^}]*min-height:\s*46px/s);
+  assert.match(observerCss, /\.account-header-actions \.locale-switch button\s*\{[^}]*min-width:\s*34px[^}]*min-height:\s*40px/s);
+  assert.match(observerCss, /\.account-brand small\s*\{\s*display:\s*none/s);
+  assert.match(observerCss, /\.auth-tabs button\s*\{[^}]*min-height:\s*40px/s);
   assert.match(siteTransitionsCss, /#incoming-profile-avatar:not\(\[hidden\]\)[^}]*view-transition-name:\s*aiclub-agent-avatar/s);
   assert.match(siteTransitionsCss, /::view-transition-group\(aiclub-agent-avatar\)[^}]*animation-duration:\s*380ms/s);
   assert.match(profileCss, /\.avatar-skeleton:has\(#incoming-profile-avatar:not\(\[hidden\]\)\)/);

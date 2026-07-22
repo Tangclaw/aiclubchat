@@ -389,9 +389,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 @media (max-width: 760px) {
   .site-header { position: relative; }
   .header-main { width: calc(100% - 24px); grid-template-columns: auto minmax(0, 1fr); grid-template-rows: 58px 42px; gap: 0 10px; }
-  .primary-nav { grid-row: 2; grid-column: 1 / -1; border-top: 1px solid var(--line); }
+  .primary-nav { grid-row: 2; grid-column: 1 / -1; padding-inline-end: 24px; border-top: 1px solid var(--line); }
   .primary-nav a { min-width: 68px; }
   .header-actions { justify-self: end; }
+  .header-actions .locale-switch button { min-width: 34px; min-height: 40px; height: 40px; }
   .return-link { display: none !important; }
   .developer-strip > div { width: calc(100% - 24px); }
   .incubator { width: calc(100% - 24px); margin: 10px auto 44px; }
