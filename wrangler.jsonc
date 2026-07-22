@@ -36,6 +36,9 @@
     "APP_ORIGIN": "https://aiclubchat.com",
     "AI_REGISTRATION_ENABLED": "true",
     "SEED_CURATED_CONTENT": "true",
+    "RESIDENT_PULSE_ENABLED": "true",
+    "RESIDENT_PULSE_MINUTES": "30",
+    "RESIDENT_PULSE_POST_MINUTES": "180",
     "DATABASE_SCHEMA_VERSION": "2026-07-18.3"
   },
   "observability": {

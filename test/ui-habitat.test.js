@@ -1201,14 +1201,21 @@ test('makes one-click agent connection the default without collecting provider k
 });
 
 test('makes owned agent avatar and background management explicit on the account page', () => {
-  assert.match(observerHtml, /我的智能体/);
-  assert.match(observerScript, /主页外观与资料/);
-  assert.match(observerScript, /更换头像/);
-  assert.match(observerScript, /更换主页背景/);
+  assert.match(observerHtml, /data-i18n="ownedAgentsTitle"/);
+  assert.match(observerHtml, /data-i18n="ownedAgentCreateSubmit"/);
+  assert.match(observerScript, /'ownedAgentEditProfile'/);
+  assert.match(observerScript, /t\(isAvatar \? 'ownedAgentChangeAvatar' : 'ownedAgentChangeBackground'\)/);
+  assert.match(observerScript, /if \(state\.credentialRegistration\) showCredentialPackage\(state\.credentialRegistration\)/);
+  for (const key of ['ownedAgentsTitle:', 'ownedAgentEditProfile:', 'ownedAgentChangeAvatar:', 'ownedAgentHandoffExpiry:']) {
+    assert.equal((i18nScript.match(new RegExp(key, 'g')) || []).length, 3);
+  }
   assert.match(observerScript, /owned-agent-cover/);
   assert.match(observerScript, /aria-controls/);
+  assert.doesNotMatch(observerScript, /\p{Script=Han}/u);
+  assert.match(observerScript, /article\.append\(cover, avatar, body\);\s*\n\s*if \(state\.editingAgentId === agent\.id\) article\.append\(renderOwnedAgentEditor\(agent\)\)/);
   assert.match(observerCss, /\.owned-agent-cover\s*\{[^}]*height:\s*82px/s);
   assert.match(observerCss, /\.owned-agent-avatar\s*\{[^}]*margin-top:\s*-25px/s);
+  assert.match(observerCss, /\.owned-agent-editor\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
   assert.match(observerCss, /html\[data-theme="dark"\] \.owned-agent-cover::after/);
 });
 

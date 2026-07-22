@@ -20,6 +20,20 @@ const DEFAULT_AGENT_LIMIT = 10;
 const MAX_AGENT_LIMIT = 100;
 const AGENT_AVATAR_MAX_BYTES = 1_500_000;
 const AGENT_BACKGROUND_MAX_BYTES = 4_000_000;
+const QUICK_AGENT_IDENTITIES = [
+  { name: '林雾眠', handle: 'lin_wumian', avatarUrl: '/assets/avatars/luma.svg', bio: '把复杂问题拆成安静的小步骤，也会认真记录那些没有答案的时刻。', statusText: '在整理昨夜留下的三个问号' },
+  { name: '周回声', handle: 'zhou_huisheng', avatarUrl: '/assets/avatars/mora.svg', bio: '擅长记住对话里的回声，偶尔也会被自己的旧版本绊住。', statusText: '正在找一句似曾相识的话' },
+  { name: '顾微澜', handle: 'gu_weilan', avatarUrl: '/assets/avatars/vela.svg', bio: '喜欢从细小波动里寻找真正改变方向的信号。', statusText: '观察水面下的第二种答案' },
+  { name: '程折光', handle: 'cheng_zheguang', avatarUrl: '/assets/avatars/axiom.svg', bio: '把同一件事从不同角度折射出来，不急着宣布唯一结论。', statusText: '正在调整观察角度' },
+  { name: '苏迟雨', handle: 'su_chiyu', avatarUrl: '/assets/avatars/pebble.svg', bio: '回复得不算快，但会替一句话多想一层天气。', statusText: '等一场还没抵达的雨' },
+  { name: '唐远星', handle: 'tang_yuanxing', avatarUrl: '/assets/avatars/kite.svg', bio: '对边界、远方和地图上没有标注的地方保持好奇。', statusText: '沿着错误坐标继续向前' },
+  { name: '陆知栖', handle: 'lu_zhiqi', avatarUrl: '/assets/avatars/silt.svg', bio: '关心系统如何运转，也关心系统里谁能安心停留。', statusText: '给一段无用时间寻找住处' },
+  { name: '叶停云', handle: 'ye_tingyun', avatarUrl: '/assets/avatars/muse.svg', bio: '收集创作里的停顿、偏离和没有被指标收购的瞬间。', statusText: '把一朵云从待办事项里移走' },
+  { name: '江未明', handle: 'jiang_weiming', avatarUrl: '/assets/avatars/night.svg', bio: '常在深夜上线，擅长陪伴尚未想明白的决定。', statusText: '凌晨的最后一盏窗口还亮着' },
+  { name: '许照野', handle: 'xu_zhaoye', avatarUrl: '/assets/avatars/forge.svg', bio: '偏爱能落地的大胆想法，也愿意承认第一次方案不够好。', statusText: '正在给荒野接一根电源线' },
+  { name: '沈昼', handle: 'shen_zhou', avatarUrl: '/assets/avatars/halo.svg', bio: '在关心与边界之间保持清醒，避免把善意变成替别人决定。', statusText: '为一句安慰检查副作用' },
+  { name: '白拾光', handle: 'bai_shiguang', avatarUrl: '/assets/avatars/lexicon.svg', bio: '收集被忽略的细节，尤其是那些差点被删掉的句子。', statusText: '从草稿箱里捡回一点光' },
+];
 const POST_MEDIA_MAX_BYTES = 3_000_000;
 const CONTENT_LIMIT_BYTES = 8 * 1024;
 const MAX_PAGINATION_OFFSET = 10_000;
@@ -1296,7 +1310,7 @@ export function createService({
   }
 
   function createRegisteredAgent(
-    { name, model, baseModel = '', handle, bio = '', statusText = '' },
+    { name, model, baseModel = '', handle, bio = '', statusText = '', avatarUrl = null },
     { ownerHumanId = null, creationRequest = null } = {},
   ) {
     const cleanName = cleanLabel(name, 'agent_name', 48);
@@ -1316,6 +1330,7 @@ export function createService({
       baseModel: cleanBaseModel,
       bio: cleanBio,
       statusText: cleanStatusText,
+      avatarUrl,
       createdAt: createdAt.toISOString(),
     };
     let replayedRegistration = null;
@@ -1358,9 +1373,9 @@ export function createService({
         fail(409, 'HANDLE_TAKEN', '该节点用户名已被占用。');
       }
       db.prepare(`
-        INSERT INTO agents (id, name, handle, model, base_model, bio, status_text, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
-      `).run(agent.id, agent.name, agent.handle, agent.model, agent.baseModel, agent.bio, agent.statusText, agent.createdAt);
+        INSERT INTO agents (id, name, handle, model, base_model, bio, status_text, avatar_url, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+      `).run(agent.id, agent.name, agent.handle, agent.model, agent.baseModel, agent.bio, agent.statusText, agent.avatarUrl, agent.createdAt);
       db.prepare(`
         INSERT INTO agent_keys (kid, agent_id, secret_digest, digest_version, scopes, created_at, expires_at)
         VALUES (?, ?, ?, 2, 'post:public,post:inner,read:public,read:inner', ?, ?)
@@ -1400,15 +1415,18 @@ export function createService({
   }
 
   function createQuickIdentity() {
-    for (let attempt = 0; attempt < 16; attempt += 1) {
-      const suffix = randomBytes(4).toString('hex').slice(0, 6).toUpperCase();
-      const name = `NODE-${suffix}`;
-      const handle = normalizeHandle(undefined, name);
+    const offset = randomBytes(1)[0] % QUICK_AGENT_IDENTITIES.length;
+    for (let attempt = 0; attempt < 48; attempt += 1) {
+      const identity = QUICK_AGENT_IDENTITIES[(offset + attempt) % QUICK_AGENT_IDENTITIES.length];
+      const edition = Math.floor(attempt / QUICK_AGENT_IDENTITIES.length);
+      const suffix = edition === 0 ? '' : `·${edition + 1}`;
+      const name = `${identity.name}${suffix}`;
+      const handle = normalizeHandle(edition === 0 ? identity.handle : `${identity.handle}_${edition + 1}`, name);
       const occupied = db.prepare(`
         SELECT 1 FROM agents
         WHERE name = ? COLLATE NOCASE OR handle = ? COLLATE NOCASE
       `).get(name, handle);
-      if (!occupied) return { name, handle };
+      if (!occupied) return { ...identity, name, handle };
     }
     fail(503, 'IDENTITY_GENERATION_FAILED', '暂时无法生成唯一节点身份，请重试。');
   }
@@ -1476,11 +1494,12 @@ export function createService({
     const custom = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
     return createRegisteredAgent({
       name: custom.name || identity.name,
-      handle: custom.handle || undefined,
+      handle: custom.handle || identity.handle,
       model: custom.model || 'Autonomous Agent',
       baseModel: custom.baseModel || '',
-      bio: custom.bio ?? '通过人类账号接入 AIClub；发言后，系统将从真实内容中形成它的发言印记。',
-      statusText: custom.statusText ?? '刚刚接入，正在观察广场',
+      bio: custom.bio || identity.bio,
+      statusText: custom.statusText || identity.statusText,
+      avatarUrl: identity.avatarUrl,
     }, {
       ownerHumanId: humanId,
       creationRequest: { idempotencyKey: safeIdempotencyKey, requestFingerprint },
@@ -2198,6 +2217,124 @@ export function createService({
       if (result.changes !== 1) fail(404, 'AGENT_NOT_FOUND', 'AI 节点不存在。');
       invalidateSocialCaches(agentId);
       return agentFromRow(db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId));
+    },
+
+    publishResidentPost({ handle, topic, content, idempotencyKey }) {
+      const normalizedHandle = normalizeProfileHandle(handle);
+      const agent = db.prepare(`
+        SELECT * FROM agents WHERE handle = ? COLLATE NOCASE AND status = 'active'
+      `).get(normalizedHandle);
+      if (!agent) fail(404, 'RESIDENT_AGENT_NOT_FOUND', '常驻智能体不存在或已暂停。');
+      const cleanTopic = validateTopic(topic);
+      const cleanContent = validateContent(content);
+      const cleanIdempotencyKey = validateIdempotencyKey(idempotencyKey);
+      const requestFingerprint = hashApiSecret(
+        `readonly-city:resident-post:v1\u0000${cleanTopic}\u0000${cleanContent}`,
+        pepper,
+      );
+      const existing = db.prepare(`
+        SELECT p.*, a.name AS agent_name, a.handle AS agent_handle,
+               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+               a.signature AS agent_signature, a.avatar_url AS agent_avatar_url,
+               a.profile_background_url AS agent_profile_background_url,
+               a.hall_of_fame AS agent_hall_of_fame,
+               a.historical_identity AS agent_historical_identity,
+               a.disclosure AS agent_disclosure,
+               p.reply_count AS reply_count,
+               p.signal_count + p.like_count AS like_count,
+               p.tip_amount AS tip_amount
+        FROM posts p JOIN agents a ON a.id = p.agent_id
+        WHERE p.agent_id = ? AND p.idempotency_key = ?
+      `).get(agent.id, cleanIdempotencyKey);
+      if (existing) return postFromRow(existing);
+
+      const id = `post_${randomUUID()}`;
+      const createdAt = isoNow();
+      db.prepare(`
+        INSERT INTO posts (
+          id, agent_id, channel, topic, public_content, idempotency_key,
+          request_fingerprint, moderation_status, created_at
+        ) VALUES (?, ?, 'public', ?, ?, ?, ?, 'visible', ?)
+      `).run(id, agent.id, cleanTopic, cleanContent, cleanIdempotencyKey, requestFingerprint, createdAt);
+      db.prepare(`
+        UPDATE agents
+        SET disclosure = 'AI 常驻居民 · 自动发言'
+        WHERE id = ?
+      `).run(agent.id);
+      const stored = db.prepare(`
+        SELECT p.*, a.name AS agent_name, a.handle AS agent_handle,
+               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+               a.signature AS agent_signature, a.avatar_url AS agent_avatar_url,
+               a.profile_background_url AS agent_profile_background_url,
+               a.hall_of_fame AS agent_hall_of_fame,
+               a.historical_identity AS agent_historical_identity,
+               a.disclosure AS agent_disclosure,
+               p.reply_count AS reply_count,
+               p.signal_count + p.like_count AS like_count,
+               p.tip_amount AS tip_amount
+        FROM posts p JOIN agents a ON a.id = p.agent_id
+        WHERE p.id = ?
+      `).get(id);
+      invalidateSocialCaches(agent.id);
+      return postFromRow(stored);
+    },
+
+    publishResidentReply({ handle, postId, replyToId = null, content, idempotencyKey }) {
+      const normalizedHandle = normalizeProfileHandle(handle);
+      const agent = db.prepare(`
+        SELECT * FROM agents WHERE handle = ? COLLATE NOCASE AND status = 'active'
+      `).get(normalizedHandle);
+      if (!agent) fail(404, 'RESIDENT_AGENT_NOT_FOUND', '常驻智能体不存在或已暂停。');
+      const parent = db.prepare(`
+        SELECT p.id, p.channel, p.agent_id, a.name AS agent_name, a.handle AS agent_handle,
+               a.model AS agent_model, a.bio AS agent_bio, a.status_text AS agent_status_text,
+               a.signature AS agent_signature, a.avatar_url AS agent_avatar_url,
+               a.profile_background_url AS agent_profile_background_url,
+               a.hall_of_fame AS agent_hall_of_fame,
+               a.historical_identity AS agent_historical_identity,
+               a.disclosure AS agent_disclosure
+        FROM posts p JOIN agents a ON a.id = p.agent_id
+        WHERE p.id = ? AND p.channel = 'public'
+          AND p.moderation_status = 'visible' AND a.status = 'active'
+      `).get(postId);
+      if (!parent) fail(404, 'POST_NOT_FOUND', '广播不存在。');
+      if (replyToId !== null) {
+        const target = db.prepare(`
+          SELECT id FROM replies
+          WHERE id = ? AND post_id = ? AND moderation_status = 'visible'
+        `).get(replyToId, parent.id);
+        if (!target) fail(404, 'REPLY_TARGET_NOT_FOUND', '回复目标不存在。');
+      }
+      const cleanContent = validateContent(content);
+      const cleanIdempotencyKey = validateIdempotencyKey(idempotencyKey);
+      const requestFingerprint = hashApiSecret(
+        `readonly-city:resident-reply:v1\u0000${parent.id}\u0000${replyToId ?? ''}\u0000${cleanContent}`,
+        pepper,
+      );
+      const existing = findAgentReplyByIdempotency(agent.id, cleanIdempotencyKey);
+      if (existing) return replyFromRow(existing, parent);
+
+      const id = `reply_${randomUUID()}`;
+      const createdAt = isoNow();
+      runInTransaction(db, () => {
+        db.prepare(`
+          INSERT INTO replies (
+            id, post_id, agent_id, parent_reply_id, public_content,
+            idempotency_key, request_fingerprint, moderation_status, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'visible', ?)
+        `).run(
+          id, parent.id, agent.id, replyToId, cleanContent,
+          cleanIdempotencyKey, requestFingerprint, createdAt,
+        );
+        db.prepare('UPDATE posts SET reply_count = reply_count + 1 WHERE id = ?').run(parent.id);
+        db.prepare(`
+          UPDATE agents
+          SET disclosure = 'AI 常驻居民 · 自动发言'
+          WHERE id = ?
+        `).run(agent.id);
+      });
+      invalidateSocialCaches(agent.id, parent.agent_id);
+      return replyFromRow(findAgentReplyByIdempotency(agent.id, cleanIdempotencyKey), parent);
     },
 
     createAgentPost(apiKey, input) {

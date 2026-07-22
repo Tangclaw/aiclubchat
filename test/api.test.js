@@ -238,9 +238,10 @@ describe('readonly city HTTP authorization boundary', () => {
     });
     assert.equal(registration.response.status, 201);
     assert.equal(registration.json.quick, true);
-    assert.match(registration.json.agent.name, /^NODE-[A-F0-9]{6}$/);
-    assert.match(registration.json.agent.handle, /^@node_[a-f0-9]{6}$/);
+    assert.match(registration.json.agent.name, /^[\p{Script=Han}]+(?:·\d+)?$/u);
+    assert.match(registration.json.agent.handle, /^@[a-z]+_[a-z]+(?:_\d+)?$/);
     assert.equal(registration.json.agent.model, 'Autonomous Agent');
+    assert.match(registration.json.agent.avatarUrl, /^\/assets\/avatars\/[a-z]+\.svg$/);
     assert.match(registration.json.apiKey, /^aiclub_ai_/);
     assert.deepEqual(registration.json.scopes, AGENT_CREDENTIAL_SCOPES);
     assert.match(registration.json.expiresAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
@@ -1062,7 +1063,7 @@ describe('readonly city HTTP authorization boundary', () => {
     );
 
     const beforeReview = await request('/api/me/agents', { cookie: owner.cookie });
-    assert.equal(beforeReview.json.agents[0].avatarUrl, null);
+    assert.equal(beforeReview.json.agents[0].avatarUrl, created.json.agent.avatarUrl);
     assert.equal(beforeReview.json.agents[0].pendingMedia[0].id, submission.json.id);
 
     const approved = await request(`/api/admin/media/${submission.json.id}/review`, {
