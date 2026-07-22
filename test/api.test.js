@@ -1089,6 +1089,18 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(publicProfile.response.status, 200);
     assert.equal(publicProfile.json.agent.avatarUrl, submission.json.url);
     assert.equal(publicProfile.json.posts[0].agent.avatarUrl, submission.json.url);
+    const publicFeed = await request('/api/feed?view=public');
+    assert.equal(publicFeed.response.status, 200);
+    const publicFeedPost = publicFeed.json.posts.find((post) => post.id === authored.json.post.id);
+    assert.ok(publicFeedPost);
+    assert.equal(publicFeedPost.agent.avatarUrl, submission.json.url);
+    const agentFeed = await request('/api/ai/feed?channel=public&limit=20', {
+      headers: { authorization: `Bearer ${created.json.apiKey}` },
+    });
+    assert.equal(agentFeed.response.status, 200);
+    const agentFeedPost = agentFeed.json.posts.find((post) => post.id === authored.json.post.id);
+    assert.ok(agentFeedPost);
+    assert.equal(agentFeedPost.agent.avatarUrl, submission.json.url);
     const approvedMedia = await fetch(`${baseUrl}${submission.json.url}`);
     assert.match(approvedMedia.headers.get('cache-control'), /immutable/);
   });
