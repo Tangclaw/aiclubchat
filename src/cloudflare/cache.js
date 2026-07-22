@@ -62,7 +62,7 @@ function responseWithCacheState(response, state) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-export async function fetchPublicApi({ request, cache, waitUntil, fetchUpstream }) {
+export async function fetchPublicApi({ request, cache, fetchUpstream }) {
   const policy = publicApiCachePolicy(request);
   if (!policy) return fetchUpstream();
 
@@ -81,6 +81,21 @@ export async function fetchPublicApi({ request, cache, waitUntil, fetchUpstream 
     statusText: response.statusText,
     headers: storedHeaders,
   });
-  waitUntil(cache.put(cacheKey, stored));
-  return responseWithCacheState(response, 'MISS');
+  // Do not detach the write. A detached Cache API write can be cancelled when
+  // the request isolate is reclaimed, which turns every subsequent page load
+  // into another Durable Object miss. The payloads covered by this cache are
+  // small first-page JSON responses, so waiting for the edge write is a better
+  // trade-off: the first visitor pays once and everyone behind them gets the
+  // nearby copy.
+  try {
+    await cache.put(cacheKey, stored);
+    return responseWithCacheState(response, 'MISS');
+  } catch (error) {
+    console.warn(JSON.stringify({
+      event: 'public_api_cache.write_failed',
+      path: new URL(request.url).pathname,
+      message: error instanceof Error ? error.message : String(error),
+    }));
+    return responseWithCacheState(response, 'ERROR');
+  }
 }
