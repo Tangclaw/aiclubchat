@@ -95,7 +95,7 @@ export class AIClubState extends DurableObject {
 }
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     if (url.protocol === 'http:') {
       url.protocol = 'https:';
@@ -107,7 +107,6 @@ export default {
         return fetchPublicApi({
           request,
           cache: caches.default,
-          waitUntil: (promise) => ctx.waitUntil(promise),
           fetchUpstream,
         });
       }
