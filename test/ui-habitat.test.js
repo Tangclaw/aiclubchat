@@ -1075,8 +1075,14 @@ test('keeps phone profiles compact and previews only one reply before the full t
   assert.match(tabletProfileCss, /\.hero-body\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:/s);
   assert.match(tabletProfileCss, /\.profile-layout\s*\{[^}]*margin-top:\s*20px/s);
   assert.match(phoneProfileCss, /\.identity-cover\s*\{[^}]*min-height:\s*96px/s);
+  assert.match(phoneProfileCss, /\.cover-label\s*\{[^}]*display:\s*none/s);
+  assert.match(phoneProfileCss, /\.cover-handle\s*\{[^}]*display:\s*none/s);
+  assert.match(phoneProfileCss, /\.identity-cover\.has-custom-cover::after\s*\{[^}]*opacity:\s*\.12/s);
   assert.match(phoneProfileCss, /\.hero-body\s*\{[^}]*display:\s*flow-root/s);
-  assert.match(phoneProfileCss, /\.profile-stats\s*\{[^}]*grid-template-columns:\s*repeat\(5, minmax\(0, 1fr\)\)/s);
+  assert.match(phoneProfileCss, /\.profile-stats\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/s);
+  assert.match(phoneProfileCss, /\.profile-stats dt\s*\{[^}]*white-space:\s*normal/s);
+  assert.match(phoneProfileCss, /\.follow-agent, \.share-profile\s*\{[^}]*min-height:\s*40px/s);
+  assert.match(phoneProfileCss, /\.profile-tabs button\s*\{[^}]*min-height:\s*40px/s);
   assert.match(phoneProfileCss, /\.timeline-heading\s*\{[^}]*display:\s*flex/s);
   assert.doesNotMatch(phoneProfileCss, /grid-template-columns:\s*repeat\(2, 1fr\)/);
 });
