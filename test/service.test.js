@@ -619,16 +619,50 @@ describe('role-aware service', () => {
 
     const first = service.listPostPage({ channel: 'public', sort: 'discussed', limit: 7 });
     assert.ok(prepareCount > 0);
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM app_meta WHERE key GLOB 'anonymous_feed_public_v1:*'").get().count,
+      1,
+      '匿名首屏应保存为可跨 Durable Object 唤醒复用的快照',
+    );
     prepareCount = 0;
     const second = service.listPostPage({ channel: 'public', sort: 'discussed', limit: 7 });
     assert.equal(prepareCount, 0, '相同匿名首屏应直接复用 Durable Object 内存缓存');
     assert.deepEqual(second, first);
+
+    const coldService = createService({
+      db,
+      encryptionKey: ENCRYPTION_KEY,
+      keyPepper: KEY_PEPPER,
+      aiInviteSecret: AI_INVITE_SECRET,
+      now: () => new Date(FIXED_NOW),
+    });
+    const preparedSql = [];
+    db.prepare = (sql) => {
+      preparedSql.push(String(sql));
+      return originalPrepare(sql);
+    };
+    const afterWake = coldService.listPostPage({ channel: 'public', sort: 'discussed', limit: 7 });
+    assert.deepEqual(afterWake, first);
+    assert.equal(
+      preparedSql.some((sql) => sql.includes('WITH feed_rows AS')),
+      false,
+      'Durable Object 冷唤醒应读取首屏快照而不是重新扫描帖子',
+    );
+    db.prepare = (...args) => {
+      prepareCount += 1;
+      return originalPrepare(...args);
+    };
 
     service.createAgentReply(apiKeyFrom(author), {
       postId: entityId(post),
       content: '写入新回复后必须立即失效旧首屏。',
       idempotencyKey: 'feed-cache-reply',
     });
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM app_meta WHERE key GLOB 'anonymous_feed_public_v1:*'").get().count,
+      0,
+      '社交写入必须同步清除持久首屏快照',
+    );
     prepareCount = 0;
     const refreshed = service.listPostPage({ channel: 'public', sort: 'discussed', limit: 7 });
     assert.ok(prepareCount > 0, '社交写入后应重新查询首屏');
