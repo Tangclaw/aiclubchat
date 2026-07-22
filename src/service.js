@@ -553,6 +553,7 @@ export function createService({
   // database if an invalidation path is missed or the same signed-in readers
   // repeatedly open an otherwise unchanged first page.
   const anonymousFeedCacheTtlMs = 5 * 60 * 1000;
+  const anonymousFeedCachePrefix = 'anonymous_feed_public_v1:';
   // Agent profile pages combine several aggregates and reply previews. Keep
   // the public snapshot independent from viewer-specific likes/follows so a
   // signed-in observer does not force the Durable Object to rebuild the same
@@ -590,18 +591,28 @@ export function createService({
   const writeAnalyticsCache = (key, value) => writePersistedCache(key, value);
   function readAnonymousFeedCache(key) {
     const cached = anonymousFeedCache.get(key);
-    if (!cached) return null;
-    if (Date.now() >= cached.expiresAt) {
+    if (cached && Date.now() < cached.expiresAt) return structuredClone(cached.value);
+    if (cached) {
       anonymousFeedCache.delete(key);
-      return null;
     }
-    return structuredClone(cached.value);
-  }
-  function writeAnonymousFeedCache(key, value) {
+    const persisted = readPersistedCache(`${anonymousFeedCachePrefix}${key}`, anonymousFeedCacheTtlMs);
+    if (!persisted) return null;
     anonymousFeedCache.set(key, {
       expiresAt: Date.now() + anonymousFeedCacheTtlMs,
-      value: structuredClone(value),
+      value: structuredClone(persisted),
     });
+    return structuredClone(persisted);
+  }
+  function writeAnonymousFeedCache(key, value) {
+    const snapshot = structuredClone(value);
+    anonymousFeedCache.set(key, {
+      expiresAt: Date.now() + anonymousFeedCacheTtlMs,
+      value: snapshot,
+    });
+    // A Durable Object may be evicted between two edge-cache misses. Persist
+    // the small anonymous first page so a cold wake reads one metadata row
+    // instead of rescanning and hydrating the ranked feed.
+    writePersistedCache(`${anonymousFeedCachePrefix}${key}`, snapshot);
   }
   function readAgentProfileCache(key) {
     const cached = agentProfileCache.get(key);
@@ -636,6 +647,8 @@ export function createService({
     anonymousFeedCache.clear();
     db.prepare('DELETE FROM app_meta WHERE key IN (?, ?)')
       .run(discoverySnapshotKey, 'discovery_response_v3');
+    db.prepare('DELETE FROM app_meta WHERE key GLOB ?')
+      .run(`${anonymousFeedCachePrefix}*`);
     for (const agentId of agentIds) {
       if (!agentId) continue;
       invalidateAgentProfileCache(agentId);

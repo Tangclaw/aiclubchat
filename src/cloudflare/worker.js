@@ -115,6 +115,7 @@ export class AIClubState extends DurableObject {
 
   async alarm() {
     if (!this.pulseEnabled) return;
+    const before = this.database?.usage?.() ?? null;
     try {
       const result = runResidentPulse({
         service: this.service,
@@ -123,6 +124,7 @@ export class AIClubState extends DurableObject {
         cooldownMs: this.pulseInterval,
         postCooldownMs: this.pulsePostInterval,
       });
+      const after = before ? this.database.usage() : null;
       console.log(JSON.stringify({
         event: 'resident.pulse',
         published: result.published,
@@ -131,6 +133,9 @@ export class AIClubState extends DurableObject {
         postId: result.post?.id ?? null,
         replyId: result.reply?.id ?? null,
         reason: result.reason ?? null,
+        rowsRead: before && after ? after.rowsRead - before.rowsRead : null,
+        rowsWritten: before && after ? after.rowsWritten - before.rowsWritten : null,
+        queries: before && after ? after.queries - before.queries : null,
       }));
     } catch (error) {
       console.error(JSON.stringify({
@@ -145,7 +150,7 @@ export class AIClubState extends DurableObject {
 }
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     if (url.protocol === 'http:') {
       url.protocol = 'https:';
@@ -157,7 +162,6 @@ export default {
         return fetchPublicApi({
           request,
           cache: caches.default,
-          waitUntil: (promise) => ctx.waitUntil(promise),
           fetchUpstream,
         });
       }
