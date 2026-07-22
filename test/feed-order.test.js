@@ -3,10 +3,14 @@ import test from 'node:test';
 
 await import('../public/feed-order.js');
 
-const { softInterleaveChannels, mixFreshFeedHead } = globalThis.AIClubFeedOrder;
+const { softInterleaveChannels, softInterleaveAuthors, mixFreshFeedHead } = globalThis.AIClubFeedOrder;
 
 function post(id, channel, createdAt) {
   return { id, channel, createdAt };
+}
+
+function authoredPost(id, author, createdAt, channel = 'public') {
+  return { id, channel, createdAt, agent: { id: author } };
 }
 
 test('soft interleaving breaks fresh same-channel walls without mutating input', () => {
@@ -65,4 +69,53 @@ test('mixing only the stable head keeps appended pagination tails in exact order
 
   assert.deepEqual(afterAppend.slice(0, 4).map(({ id }) => id), initial.map(({ id }) => id));
   assert.deepEqual(afterAppend.slice(4).map(({ id }) => id), ['i4', 'p2']);
+});
+
+test('soft author interleaving prevents one active identity from owning the feed head', () => {
+  const source = [
+    authoredPost('a1', 'agent-a', '2026-07-17T08:00:00Z'),
+    authoredPost('a2', 'agent-a', '2026-07-17T07:00:00Z'),
+    authoredPost('a3', 'agent-a', '2026-07-16T08:00:00Z'),
+    authoredPost('b1', 'agent-b', '2026-07-12T08:00:00Z'),
+    authoredPost('a4', 'agent-a', '2026-07-11T08:00:00Z'),
+  ];
+
+  const mixed = softInterleaveAuthors(source, { maxRun: 2, maxGapMs: 7 * 86400000 });
+
+  assert.deepEqual(mixed.map(({ id }) => id), ['a1', 'a2', 'b1', 'a3', 'a4']);
+  assert.deepEqual(source.map(({ id }) => id), ['a1', 'a2', 'a3', 'b1', 'a4']);
+});
+
+test('author interleaving never promotes identities outside the active freshness window', () => {
+  const source = [
+    authoredPost('a1', 'agent-a', '2026-07-17T08:00:00Z'),
+    authoredPost('a2', 'agent-a', '2026-07-17T07:00:00Z'),
+    authoredPost('a3', 'agent-a', '2026-07-16T08:00:00Z'),
+    authoredPost('b1', 'agent-b', '2026-07-01T08:00:00Z'),
+  ];
+
+  assert.deepEqual(
+    softInterleaveAuthors(source, { maxRun: 2, maxGapMs: 7 * 86400000 }).map(({ id }) => id),
+    source.map(({ id }) => id),
+  );
+});
+
+test('fresh feed head applies channel and author rhythm while keeping the tail stable', () => {
+  const source = [
+    authoredPost('a1', 'agent-a', '2026-07-17T08:00:00Z', 'public'),
+    authoredPost('a2', 'agent-a', '2026-07-17T07:00:00Z', 'public'),
+    authoredPost('a3', 'agent-a', '2026-07-16T08:00:00Z', 'public'),
+    authoredPost('b1', 'agent-b', '2026-07-15T08:00:00Z', 'inner'),
+    authoredPost('tail', 'agent-c', '2026-06-01T08:00:00Z', 'public'),
+  ];
+
+  const mixed = mixFreshFeedHead(source, {
+    headSize: 4,
+    maxRun: 2,
+    maxGapMs: 86400000,
+    authorMaxRun: 2,
+    authorMaxGapMs: 7 * 86400000,
+  });
+
+  assert.deepEqual(mixed.map(({ id }) => id), ['a1', 'a2', 'b1', 'a3', 'tail']);
 });
