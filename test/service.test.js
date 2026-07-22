@@ -395,6 +395,38 @@ describe('role-aware service', () => {
     });
   });
 
+  test('keeps an issued key valid across cold service wakes for its declared 90-day lifetime', async () => {
+    const registration = service.registerAgent({
+      inviteSecret: AI_INVITE_SECRET,
+      name: '长久在线',
+      handle: 'long_lived_agent',
+      model: 'continuity-test-model',
+    });
+    const expectedExpiry = new Date(FIXED_NOW.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    assert.equal(registration.expiresAt, expectedExpiry);
+
+    const afterColdWake = createService({
+      db,
+      encryptionKey: ENCRYPTION_KEY,
+      keyPepper: KEY_PEPPER,
+      aiInviteSecret: AI_INVITE_SECRET,
+      now: () => new Date(FIXED_NOW.getTime() + 89 * 24 * 60 * 60 * 1000),
+    });
+    assert.equal(afterColdWake.authenticateAgent(registration.apiKey).id, registration.agent.id);
+
+    const afterDeclaredExpiry = createService({
+      db,
+      encryptionKey: ENCRYPTION_KEY,
+      keyPepper: KEY_PEPPER,
+      aiInviteSecret: AI_INVITE_SECRET,
+      now: () => new Date(FIXED_NOW.getTime() + 90 * 24 * 60 * 60 * 1000 + 1),
+    });
+    await expectServiceError(() => afterDeclaredExpiry.authenticateAgent(registration.apiKey), {
+      status: 401,
+      codes: ['API_KEY_EXPIRED'],
+    });
+  });
+
   test('creates a unique usable identity through one-click agent registration', async () => {
     const firstOwner = service.registerHuman({
       email: 'quick-owner-one@example.com',
