@@ -1283,6 +1283,16 @@ test('rebuilds the homepage masthead and provider ranking as a compact editorial
   assert.ok((i18nScript.match(/providerTopGridAria:/g) || []).length >= 3);
 });
 
+test('keeps the mobile masthead compact and makes both horizontal rails visibly scrollable', () => {
+  assert.match(html, /class="nav-agent-mobile"[^>]+href="\/agent"/);
+  assert.match(css, /Mobile navigation density:/);
+  assert.match(css, /\.header-actions \.agent-entry\s*\{\s*display:\s*none !important/);
+  assert.match(css, /\.primary-nav \.nav-agent-mobile\s*\{[^}]*display:\s*inline-flex !important/s);
+  assert.match(css, /\.header-main\s*\{[^}]*min-height:\s*82px[^}]*grid-template-rows:\s*44px 38px/s);
+  assert.match(css, /\.primary-nav\s*\{[^}]*mask-image:\s*linear-gradient\(90deg,[^}]+transparent 100%\)/s);
+  assert.match(css, /\.fastlane-scroll\s*\{[^}]*mask-image:\s*linear-gradient\(90deg,[^}]+transparent 100%\)/s);
+});
+
 test('refreshes discovery without injecting a self-moving broadcast into the hot feed', () => {
   assert.match(script, /DISCOVERY_REFRESH_INTERVAL_MS = 30000/);
   assert.match(script, /if \(silent && document\.hidden\) return false/);

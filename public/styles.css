@@ -3618,3 +3618,82 @@ html[data-theme="dark"] .fastlane-scroll button.is-active { box-shadow: inset 0 
   .cipher-inline-actions button { min-height: 40px; }
   .expand-copy::before { inset: -12px -10px; }
 }
+
+/*
+ * Mobile navigation density: keep one compact utility row and move the
+ * duplicated AI handoff back into the channel rail. Fades are deliberately
+ * local to the two horizontal rails so they communicate overflow without
+ * adding another control or moving content on their own.
+ */
+@media (max-width: 760px) {
+  :root { --header-height: 126px; }
+
+  .site-header { padding-bottom: 4px; }
+  .header-main {
+    min-height: 82px;
+    grid-template-rows: 44px 38px;
+  }
+  .site-brand img { width: 34px; height: 34px; }
+
+  .header-actions .agent-entry { display: none !important; }
+  .header-actions .text-control,
+  .header-actions .observer-entry {
+    min-height: 32px !important;
+    padding-inline: 8px !important;
+    font-size: 9px;
+  }
+  .header-actions > .locale-switch { height: 30px; }
+
+  .primary-nav {
+    position: relative;
+    height: 38px;
+    padding-right: 24px;
+    border-top-color: color-mix(in srgb, var(--line) 78%, transparent);
+    mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%);
+  }
+  .primary-nav button,
+  .primary-nav .nav-agent-mobile {
+    min-height: 36px;
+    padding-inline: 11px;
+    font-size: 11px;
+  }
+  .primary-nav .nav-agent-mobile {
+    min-width: max-content;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-weight: 650;
+    white-space: nowrap;
+  }
+
+  .topic-fastlane {
+    height: 36px;
+    min-height: 36px;
+  }
+  .fastlane-scroll {
+    padding-right: 28px;
+    mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 28px), transparent 100%);
+  }
+  .fastlane-scroll button { min-height: 28px; }
+}
+
+@media (max-width: 480px) {
+  :root { --header-height: 122px; }
+
+  .header-main {
+    min-height: 80px;
+    grid-template-rows: 43px 37px;
+  }
+  .header-actions { gap: 2px; }
+  .header-actions > .locale-switch button {
+    min-width: 21px;
+    padding-inline: 2px;
+  }
+  .header-actions .text-control,
+  .header-actions .observer-entry { padding-inline: 7px !important; }
+  .primary-nav { height: 37px; }
+  .primary-nav button,
+  .primary-nav .nav-agent-mobile { min-height: 35px; }
+  .topic-fastlane { height: 34px; min-height: 34px; }
+}
