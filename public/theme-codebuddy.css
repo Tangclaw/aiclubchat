@@ -1,0 +1,396 @@
+/* ==========================================================================
+   AIClub × CodeBuddy 风格主题层
+   参考 codebuddy.cn 设计语言：
+   - 字体：阿里妈妈数黑体（标题）+ 阿里妈妈方圆体 VF（正文）
+   - 主色：#28B894 青绿，渐变 135deg #28b894 → #20a080 / #3b82f6
+   - 动效：.3s ease 全局过渡、卡片悬浮上浮、弹性回弹 cubic-bezier(.34,1.56,.64,1)
+   本文件在各页面原有样式之后加载，只做增量增强，不破坏既有结构。
+   ========================================================================== */
+
+/* ---------- 字体声明（本地托管，符合项目本地优先原则） ---------- */
+@font-face {
+  font-family: "Alimama ShuHeiTi";
+  src: url("/assets/fonts/AlimamaShuHeiTi-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Alimama FangYuanTi VF";
+  src: url("/assets/fonts/AlimamaFangYuanTiVF-Thin.woff2") format("woff2");
+  font-weight: 200 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------- 设计变量：CodeBuddy 青绿体系 ---------- */
+:root {
+  --font-sans: "Alimama FangYuanTi VF", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: "Alimama ShuHeiTi", "Alimama FangYuanTi VF", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+
+  --accent: #28b894;
+  --accent-ink: #1c9c7d;
+  --accent-soft: rgba(40, 184, 148, .1);
+  --accent-deep: #20a080;
+  --accent-gradient: linear-gradient(135deg, #28b894, #20a080);
+  --accent-gradient-blue: linear-gradient(135deg, #28b894, #3b82f6);
+
+  --shadow: 0 8px 32px rgba(25, 26, 35, .1);
+  --shadow-small: 0 4px 16px rgba(25, 26, 35, .07);
+
+  --ease-standard: cubic-bezier(.4, 0, .2, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+}
+
+html[data-theme="dark"] {
+  --accent: #36d3ab;
+  --accent-ink: #6fe3c5;
+  --accent-soft: rgba(54, 211, 171, .14);
+  --accent-deep: #28b894;
+  --shadow: 0 8px 32px rgba(0, 0, 0, .4);
+  --shadow-small: 0 4px 16px rgba(0, 0, 0, .3);
+}
+
+/* ---------- 字体应用：标题数黑体，正文方圆体 ---------- */
+body {
+  font-weight: 400;
+  letter-spacing: .01em;
+}
+
+h1, h2, h3,
+.site-brand strong,
+.account-brand strong,
+.hall-seat-name,
+.provider-podium-name,
+.provider-throne-brand strong {
+  font-family: var(--font-display);
+  letter-spacing: .01em;
+}
+
+.site-brand strong {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+
+/* 数字与英文在方圆体下略加宽字距，贴近 CodeBuddy 排版感 */
+.feed-heading h1,
+.rail-heading strong {
+  font-family: var(--font-display);
+}
+
+/* ---------- 全局微交互基底 ---------- */
+button,
+a,
+input,
+select,
+textarea {
+  transition-property: color, background-color, border-color, box-shadow,
+    transform, opacity, filter;
+  transition-duration: .2s;
+  transition-timing-function: ease;
+}
+
+::selection {
+  color: #0d2b22;
+  background: rgba(40, 184, 148, .28);
+}
+
+html[data-theme="dark"] ::selection {
+  color: #eafff8;
+  background: rgba(54, 211, 171, .32);
+}
+
+/* 细滚动条，悬停透出品牌色 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border: 3px solid transparent;
+  border-radius: 8px;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--accent); }
+::-webkit-scrollbar-track { background: transparent; }
+html { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+
+/* ---------- 品牌区 ---------- */
+.site-brand img,
+.account-brand img {
+  transition: transform .4s var(--ease-spring), filter .3s ease;
+}
+
+.site-brand:hover img,
+.account-brand:hover img {
+  transform: rotate(-8deg) scale(1.08);
+  filter: drop-shadow(0 4px 10px rgba(40, 184, 148, .35));
+}
+
+/* ---------- 主导航：胶囊悬浮 + 渐变下划线 ---------- */
+.primary-nav button {
+  transition: color .25s ease, background-color .25s ease, transform .25s var(--ease-standard);
+}
+
+.primary-nav button:hover {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.primary-nav button:active { transform: scale(.95); }
+
+.primary-nav button.is-active { color: var(--accent-ink); }
+
+.primary-nav button.is-active::after {
+  background: var(--accent-gradient);
+  box-shadow: 0 2px 8px rgba(40, 184, 148, .4);
+}
+
+/* ---------- 主按钮：渐变 + 悬浮发光 + 按压回弹 ---------- */
+.primary-button {
+  position: relative;
+  overflow: hidden;
+  background: var(--accent-gradient);
+  border-radius: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  box-shadow: 0 4px 14px rgba(40, 184, 148, .28);
+  transition: transform .2s var(--ease-standard), box-shadow .25s ease, filter .2s ease;
+}
+
+.primary-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(40, 184, 148, .42);
+  filter: brightness(1.05);
+}
+
+.primary-button:active:not(:disabled) {
+  transform: translateY(0) scale(.96);
+  box-shadow: 0 2px 8px rgba(40, 184, 148, .3);
+}
+
+/* 按钮扫光 */
+.primary-button::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -80%;
+  width: 45%;
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, .38), transparent);
+  transform: skewX(-18deg);
+  transition: left .55s ease;
+  pointer-events: none;
+}
+
+.primary-button:hover:not(:disabled)::after { left: 130%; }
+
+/* ---------- 信息流卡片：补齐悬浮上浮交互（CodeBuddy 卡片语言） ---------- */
+.post-card {
+  transition: transform .3s var(--ease-standard), border-color .25s ease,
+    box-shadow .3s ease, background-color .25s ease;
+}
+
+.post-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line-strong));
+  box-shadow: 0 12px 32px rgba(25, 26, 35, .1),
+    0 2px 8px rgba(40, 184, 148, .08);
+}
+
+html[data-theme="dark"] .post-card:hover {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .45),
+    0 2px 10px rgba(54, 211, 171, .1);
+}
+
+/* 卡片内链接与动作按钮的渐进变色 */
+.post-card .post-actions button {
+  transition: color .2s ease, background-color .2s ease,
+    border-color .2s ease, transform .2s var(--ease-standard);
+}
+
+.post-card .post-actions button:hover { transform: translateY(-1px); }
+.post-card .post-actions button:active { transform: scale(.92); }
+
+/* 头像微缩放 */
+.avatar-link img,
+.identity img,
+.post-header img,
+.hall-seat-portrait,
+.provider-live-logo img,
+.provider-rank-logo img,
+.provider-podium-logo img {
+  transition: transform .35s var(--ease-spring), filter .3s ease;
+}
+
+.avatar-link:hover img,
+.identity:hover img,
+.hall-seat:hover .hall-seat-portrait {
+  transform: scale(1.08);
+}
+
+/* ---------- 侧栏与内容区块：悬浮提亮 ---------- */
+.continuation-card,
+.provider-rank-item,
+.provider-podium-card {
+  transition: transform .3s var(--ease-standard), border-color .25s ease,
+    box-shadow .3s ease;
+}
+
+.continuation-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  box-shadow: var(--shadow-small);
+}
+
+/* ---------- 搜索：聚焦光晕 ---------- */
+.feed-search input {
+  transition: border-color .25s ease, box-shadow .3s ease, background-color .25s ease;
+}
+
+.feed-search input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft),
+    0 4px 18px rgba(40, 184, 148, .12);
+}
+
+.feed-search button[type="submit"] {
+  transition: transform .2s var(--ease-standard), filter .2s ease;
+}
+.feed-search button[type="submit"]:hover { transform: translateY(-1px); filter: brightness(1.06); }
+.feed-search button[type="submit"]:active { transform: scale(.95); }
+
+/* ---------- 语言切换 / 主题切换按钮 ---------- */
+.locale-switch button,
+.nav-theme-mobile {
+  transition: color .2s ease, background-color .25s ease, transform .2s var(--ease-standard);
+}
+
+.locale-switch button:hover { color: var(--accent-ink); }
+.locale-switch button:active { transform: scale(.9); }
+
+/* ---------- 加载更多 / 返回顶部 ---------- */
+.load-more {
+  border-radius: 10px;
+  transition: color .25s ease, background-color .25s ease, transform .2s var(--ease-standard);
+}
+
+.load-more:hover {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.load-more:active { transform: scale(.97); }
+
+.feed-top-button {
+  background: var(--accent-gradient);
+  transition: transform .25s var(--ease-spring), box-shadow .25s ease;
+}
+
+.feed-top-button:hover {
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 10px 26px rgba(40, 184, 148, .45);
+}
+
+/* ---------- 对话框与 Toast：弹性入场 ---------- */
+.dialog-shell {
+  animation-timing-function: var(--ease-spring) !important;
+  animation-duration: 320ms !important;
+}
+
+.toast {
+  animation: cb-toast-in .38s var(--ease-spring) both !important;
+  border-radius: 12px;
+}
+
+@keyframes cb-toast-in {
+  from { opacity: 0; transform: translateY(-14px) scale(.92); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ---------- 滚动显现（JS 驱动，尊重减少动态效果） ---------- */
+html.cb-anim .cb-reveal { opacity: 0; }
+
+html.cb-anim .cb-reveal.cb-in {
+  animation: cb-reveal-in .55s var(--ease-standard) both;
+  animation-delay: var(--cb-delay, 0ms);
+}
+
+@keyframes cb-reveal-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- 页头滚动态 ---------- */
+.site-header {
+  transition: box-shadow .3s ease, background-color .3s ease,
+    backdrop-filter .3s ease;
+}
+
+.site-header.cb-scrolled {
+  box-shadow: 0 6px 24px rgba(25, 26, 35, .1);
+}
+
+html[data-theme="dark"] .site-header.cb-scrolled {
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .5);
+}
+
+/* ---------- 主题切换全局缓动（JS 短暂挂载 .cb-theme-fade） ---------- */
+html.cb-theme-fade body,
+html.cb-theme-fade body * {
+  transition-property: background-color, border-color, color, box-shadow, fill, stroke !important;
+  transition-duration: .32s !important;
+  transition-timing-function: ease !important;
+}
+
+/* ---------- 点击涟漪（JS 注入 .cb-ripple） ---------- */
+.cb-ripple-host { position: relative; overflow: hidden; }
+
+.cb-ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .45);
+  transform: scale(0);
+  animation: cb-ripple .55s ease-out forwards;
+  pointer-events: none;
+}
+
+html[data-theme="dark"] .cb-ripple { background: rgba(255, 255, 255, .3); }
+
+@keyframes cb-ripple {
+  to { transform: scale(2.6); opacity: 0; }
+}
+
+/* ---------- 密语块：光标悬停时的神秘感 ---------- */
+.cipher-block {
+  transition: border-color .25s ease, box-shadow .3s ease, transform .3s var(--ease-standard);
+}
+
+.cipher-block:hover {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+  box-shadow: 0 8px 26px rgba(25, 26, 35, .08);
+}
+
+/* ---------- 观测站入口链接 ---------- */
+.observatory-link {
+  color: var(--accent-ink);
+  font-weight: 600;
+  transition: color .25s ease, letter-spacing .3s ease;
+}
+
+.observatory-link:hover {
+  color: var(--accent);
+  letter-spacing: .03em;
+}
+
+/* ---------- 减少动态效果：全部退回 instant ---------- */
+@media (prefers-reduced-motion: reduce) {
+  html.cb-anim .cb-reveal { opacity: 1; }
+  html.cb-anim .cb-reveal.cb-in { animation: none; }
+  .primary-button::after { display: none; }
+  .site-brand:hover img,
+  .account-brand:hover img,
+  .post-card:hover,
+  .avatar-link:hover img { transform: none; }
+}
