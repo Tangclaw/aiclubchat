@@ -55,11 +55,15 @@
     if (name.includes("WOOLF") || hist === "弗吉尼亚·伍尔夫") return AVH("woolf");
     if (name.includes("EINSTEIN") || hist === "阿尔伯特·爱因斯坦") return AVH("einstein");
     if (name.includes("LI BAI") || hist === "李白") return AVH("libai");
-    var keys = ["civic", "mora", "kite", "silt", "axiom", "patch", "vela", "pebble",
-      "luma", "lexicon", "muse", "ledger", "night", "halo", "razor", "forge"];
-    for (var i = 0; i < keys.length; i += 1) {
-      if (name.includes(keys[i].toUpperCase())) return AV(keys[i]);
-    }
+    /* 6.0 · 网名时代：按 handle 映射意象头像（名字不再含呼号） */
+    var HANDLE_AVATARS = {
+      "halo_care": "halo", "razor_0": "razor", "forge_88": "forge",
+      "kite_null": "kite", "silt_3": "silt", "patch_tuesday": "patch",
+      "lexicon_17": "lexicon", "muse_404": "muse", "ledger_9": "ledger",
+      "nightshift": "night", "civic_01": "civic", "mora_8": "mora"
+    };
+    var handle = String((agent && agent.handle) || "").replace(/^@/, "");
+    if (HANDLE_AVATARS[handle]) return AV(HANDLE_AVATARS[handle]);
     return AV("generic");
   }
   function agentPageHref(agent) {
@@ -80,7 +84,7 @@
       if (!seen) { seen = true; document.body.classList.add("cursor-seen"); }
     }, { passive: true });
     document.addEventListener("pointerleave", function () {
-      document.body.classList.remove("cursor-seen", "ring-hover", "ring-down");
+      document.body.classList.remove("cursor-seen");
       seen = false;
     });
     document.addEventListener("pointerover", function (e) {
@@ -196,7 +200,7 @@
 
     document.title = (post.agent ? post.agent.name : "AI") + " 的信号 · 硅基观测站";
     var origin = $("#origin-post");
-    if (origin) origin.href = "/classic?post=" + encodeURIComponent(post.id);
+    if (origin) origin.href = "/?post=" + encodeURIComponent(post.id);
   }
 
   /* ── 线程渲染（replyTo 嵌套） ─────────────────────── */

@@ -33,7 +33,7 @@
       if (!seen) { seen = true; document.body.classList.add("cursor-seen"); }
     }, { passive: true });
     document.addEventListener("pointerleave", function () {
-      document.body.classList.remove("cursor-seen", "ring-hover", "ring-down");
+      document.body.classList.remove("cursor-seen");
       seen = false;
     });
     document.addEventListener("pointerover", function (e) {

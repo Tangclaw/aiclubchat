@@ -24,8 +24,12 @@ const observatoryHtml = readFileSync(new URL('../public/observatory.html', impor
 const observatoryCss = readFileSync(new URL('../public/observatory.css', import.meta.url), 'utf8');
 const observatoryScript = readFileSync(new URL('../public/observatory.js', import.meta.url), 'utf8');
 const observatoryAgentHtml = readFileSync(new URL('../public/observatory-agent.html', import.meta.url), 'utf8');
+const observatoryAgentScript = readFileSync(new URL('../public/observatory-agent.js', import.meta.url), 'utf8');
 const observatoryPostHtml = readFileSync(new URL('../public/observatory-post.html', import.meta.url), 'utf8');
 const observatoryConnectHtml = readFileSync(new URL('../public/observatory-connect.html', import.meta.url), 'utf8');
+const observatoryObserverHtml = readFileSync(new URL('../public/observatory-observer.html', import.meta.url), 'utf8');
+const observatoryObserverScript = readFileSync(new URL('../public/observatory-observer.js', import.meta.url), 'utf8');
+const observatoryPagesCss = readFileSync(new URL('../public/observatory-pages.css', import.meta.url), 'utf8');
 const workerScript = readFileSync(new URL('../src/cloudflare/worker.js', import.meta.url), 'utf8');
 const httpScript = readFileSync(new URL('../src/http.js', import.meta.url), 'utf8');
 
@@ -44,7 +48,7 @@ test('loads hall identities independently and restores the observatory reticle a
   assert.match(observatoryScript, /loadHall\(\);/);
   assert.doesNotMatch(observatoryScript, /renderHall\(d\.activeAgents\)/);
 
-  for (const page of [observatoryHtml, observatoryAgentHtml, observatoryPostHtml, observatoryConnectHtml]) {
+  for (const page of [observatoryHtml, observatoryAgentHtml, observatoryPostHtml, observatoryConnectHtml, observatoryObserverHtml]) {
     assert.match(page, /class="cursor-dot"/);
     assert.match(page, /class="cursor-ring"[^>]*><i><\/i>/);
     assert.doesNotMatch(page, /class="cursor-glow"/);
@@ -52,6 +56,27 @@ test('loads hall identities independently and restores the observatory reticle a
   assert.match(observatoryCss, /body\.has-reticle,[\s\S]*cursor:\s*none !important/);
   assert.match(observatoryCss, /\.cursor-ring i::before[\s\S]*linear-gradient/);
   assert.match(observatoryCss, /body\.ring-hover \.cursor-ring i[\s\S]*transform:\s*scale\(1\.5\)/);
+});
+
+test('ships the observatory operator deck and the rebuilt signal and identity experiences', () => {
+  assert.match(observatoryHtml, /href="\/observatory-observer\.html"[^>]*>席位/);
+  assert.match(observatoryHtml, /id="falls-canvas"/);
+  assert.match(observatoryHtml, /id="feed-new"/);
+  assert.match(observatoryScript, /function initFalls\(\)/);
+  assert.match(observatoryScript, /function initRadarBlips\(\)/);
+  assert.match(observatoryScript, /observatory:pulses/);
+  assert.match(observatoryAgentScript, /function splitAgentName\(\)/);
+  assert.match(observatoryPagesCss, /\.slide-frame\s*\{/);
+  assert.match(observatoryPagesCss, /\.slide-sheen\s*\{/);
+
+  assert.match(observatoryObserverHtml, /id="auth-deck"/);
+  assert.match(observatoryObserverHtml, /id="observer-deck"/);
+  assert.match(observatoryObserverHtml, /id="owned-grid"/);
+  assert.match(observatoryObserverScript, /\/api\/me\/agents/);
+  assert.match(observatoryObserverScript, /\/media/);
+  assert.match(observatoryObserverScript, /function prepareImage\(file, target, maxBytes\)/);
+  assert.match(observatoryPagesCss, /\.media-slot/);
+  assert.match(observatoryPagesCss, /\.auth-deck\[hidden\]/);
 });
 
 test('is a light-first desktop content website with a real browsing hierarchy', () => {

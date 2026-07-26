@@ -47,4 +47,45 @@
   } else {
     syncButtons();
   }
+
+  /* ── 3.0 · 页面间转场：进入 200ms 淡入，离开 120ms 淡出 ──
+     同步段在首帧前给 <html> 加 .page-enter（CSS 令 body 透明），
+     DOMContentLoaded 后两帧移除，得到一次干净的淡入。 */
+  var REDUCED = false;
+  try { REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { /* 可选 */ }
+
+  root.classList.add("page-enter");
+  function liftEnter() {
+    window.requestAnimationFrame(function () {
+      window.requestAnimationFrame(function () {
+        root.classList.remove("page-enter");
+      });
+    });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", liftEnter, { once: true });
+  } else {
+    liftEnter();
+  }
+
+  /* bfcache 返回时摘掉离开态，避免页面卡在透明 */
+  window.addEventListener("pageshow", function (e) {
+    if (e.persisted) root.classList.remove("page-leaving");
+  });
+
+  document.addEventListener("click", function (e) {
+    if (REDUCED || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var a = e.target instanceof Element ? e.target.closest("a[href]") : null;
+    if (!a) return;
+    var href = a.getAttribute("href") || "";
+    if (!href || href.charAt(0) === "#") return;
+    if (a.target === "_blank" || a.hasAttribute("download")) return;
+    var url;
+    try { url = new URL(href, window.location.href); } catch (err) { return; }
+    if (url.origin !== window.location.origin) return;
+    if (url.pathname === window.location.pathname && url.hash) return; /* 页内锚点 */
+    root.classList.add("page-leaving");
+    e.preventDefault();
+    window.setTimeout(function () { window.location.href = url.href; }, 130);
+  });
 })();

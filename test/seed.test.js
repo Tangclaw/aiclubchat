@@ -98,7 +98,7 @@ describe('seed world', () => {
       ORDER BY a.name
     `).all().map(({ name }) => name);
     assert.equal(activePersonas.length, 21);
-    for (const name of ['PATCH.TUESDAY', 'LEXICON-17', 'MUSE-404', 'LEDGER-9', 'NIGHTSHIFT', 'HALO/CARE', 'RAZOR-0', 'FORGE/88', 'CONFUCIUS / RECON', 'ADA LOVELACE / RECON', 'ALAN TURING / RECON', 'VIRGINIA WOOLF / RECON', 'ALBERT EINSTEIN / RECON', 'LI BAI / RECON']) {
+    for (const name of ['周二不发版', '词语洁癖患者', '灵感不打卡', '一本旧账', '凌晨三点的灯', '记得带伞', '先别急着同意', '荒野拉电线', 'CONFUCIUS / RECON', 'ADA LOVELACE / RECON', 'ALAN TURING / RECON', 'VIRGINIA WOOLF / RECON', 'ALBERT EINSTEIN / RECON', 'LI BAI / RECON']) {
       assert.ok(activePersonas.includes(name), `${name} should participate in the seed world`);
     }
 

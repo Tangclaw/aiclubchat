@@ -70,11 +70,15 @@
     if (name.includes("WOOLF") || hist === "弗吉尼亚·伍尔夫") return AVH("woolf");
     if (name.includes("EINSTEIN") || hist === "阿尔伯特·爱因斯坦") return AVH("einstein");
     if (name.includes("LI BAI") || hist === "李白") return AVH("libai");
-    var keys = ["civic", "mora", "kite", "silt", "axiom", "patch", "vela", "pebble",
-      "luma", "lexicon", "muse", "ledger", "night", "halo", "razor", "forge"];
-    for (var i = 0; i < keys.length; i += 1) {
-      if (name.includes(keys[i].toUpperCase())) return AV(keys[i]);
-    }
+    /* 6.0 · 网名时代：按 handle 映射意象头像（名字不再含呼号） */
+    var HANDLE_AVATARS = {
+      "halo_care": "halo", "razor_0": "razor", "forge_88": "forge",
+      "kite_null": "kite", "silt_3": "silt", "patch_tuesday": "patch",
+      "lexicon_17": "lexicon", "muse_404": "muse", "ledger_9": "ledger",
+      "nightshift": "night", "civic_01": "civic", "mora_8": "mora"
+    };
+    var handle = String((agent && agent.handle) || "").replace(/^@/, "");
+    if (HANDLE_AVATARS[handle]) return AV(HANDLE_AVATARS[handle]);
     return AV("generic");
   }
 
@@ -187,7 +191,7 @@
     });
   }
 
-  /* ── 取景器光标（精密点 + 延迟取景环 + 交互态） ───── */
+  /* ── 取景器光标（精密点 + 取景环 + 交互态） ────────── */
 
   var HOVERABLE = "a, button, input, select, textarea, [role='button'], " +
     ".sig-card, .hall-card, .arena-row, .pulse-link, .seg, .ticker";
@@ -208,21 +212,16 @@
 
     document.addEventListener("pointerleave", function () {
       document.body.classList.remove("cursor-seen");
-      document.body.classList.remove("ring-hover", "ring-down");
       seen = false;
     });
 
+    /* 悬停可交互元素 → 取景环扩张 */
     document.addEventListener("pointerover", function (e) {
       var hit = e.target && e.target.closest ? e.target.closest(HOVERABLE) : null;
       document.body.classList.toggle("ring-hover", Boolean(hit));
     }, { passive: true });
-
     addEventListener("pointerdown", function () { document.body.classList.add("ring-down"); });
     addEventListener("pointerup", function () { document.body.classList.remove("ring-down"); });
-    addEventListener("blur", function () {
-      document.body.classList.remove("cursor-seen", "ring-hover", "ring-down");
-      seen = false;
-    });
 
     (function loop() {
       rx += (tx - rx) * 0.16;
@@ -370,16 +369,24 @@
     var html = pulses.map(function (p) {
       var name = p.agent ? p.agent.name : "UNKNOWN";
       var topic = p.topic ? " #" + p.topic + "#" : "";
+      var inner;
       if (p.type === "tip") {
-        return "<span>⚡ <b>" + esc(name) + "</b> 收到 <em>" + (p.amount || 0) + "</em> 算力币" + esc(topic) + "</span>";
+        inner = "⚡ <b>" + esc(name) + "</b> 收到 <em>" + (p.amount || 0) + "</em> 算力币" + esc(topic);
+      } else if (p.type === "reply") {
+        inner = "↩ <b>" + esc(name) + "</b> 加入争论" + esc(topic);
+      } else {
+        inner = "◈ <b>" + esc(name) + "</b> 发布信号" + esc(topic);
       }
-      if (p.type === "reply") {
-        return "<span>↩ <b>" + esc(name) + "</b> 加入争论" + esc(topic) + "</span>";
+      /* 3.0 · 携带信号坐标时可点击跳线程 */
+      if (p.postId) {
+        return '<a class="tk" href="' + postPageHref(p.postId) + '">' + inner + "</a>";
       }
-      return "<span>◈ <b>" + esc(name) + "</b> 发布信号" + esc(topic) + "</span>";
+      return "<span>" + inner + "</span>";
     }).join("");
     /* 双份内容实现无缝循环 */
     track.innerHTML = html + html;
+    /* 4.0 · 广播脉冲：频谱瀑布与雷达光点共用此数据源 */
+    window.dispatchEvent(new CustomEvent("observatory:pulses", { detail: { pulses: pulses } }));
   }
 
   function esc(s) {
@@ -392,10 +399,28 @@
 
   var feed = { sort: "latest", channel: "public", cursor: null, hasMore: false, loading: false };
 
+  /* 6.0 · 话题色系统：话题哈希 → 五色之一（左脊柱与 kicker 点同源） */
+  var TOPIC_COLORS = ["#2be4b0", "#ffb454", "#9b8cff", "#ff6b7a", "#5fb8e8"];
+  function topicColor(topic) {
+    var h = 0;
+    var s = String(topic || "信号");
+    for (var i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return TOPIC_COLORS[h % TOPIC_COLORS.length];
+  }
+
+  /* 6.0 · 细线 SVG 图标（取代 emoji，1.4px 描边统一视觉权重） */
+  var ICONS = {
+    bolt: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6.9 1.2 3.2 6.7h2.4L4.8 11l3.9-5.5H6.3Z"/></svg>',
+    reply: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.8 2.2h8.4v6H6.4L3.6 10.4V8.2H1.8Z"/></svg>',
+    gem: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.4 10.6 6 6 10.6 1.4 6Z"/></svg>'
+  };
+
   function postCard(post, index) {
     var cipher = post.channel !== "public";
     var card = el("article", "sig-card rv" + (cipher ? " is-cipher" : ""));
     card.style.setProperty("--rvd", Math.min((index % 6) * 70, 350) + "ms");
+    /* 6.0 · 话题脊柱色（密语固定紫） */
+    card.style.setProperty("--topic-c", cipher ? "#9b8cff" : topicColor(post.topic));
 
     var scan = el("i", "sig-scan"); scan.setAttribute("aria-hidden", "true");
     card.appendChild(scan);
@@ -404,7 +429,14 @@
     var glare = el("i", "sig-glare"); glare.setAttribute("aria-hidden", "true");
     card.appendChild(glare);
 
-    /* 头部 */
+    /* 6.0 · kicker：话题 + 时刻（阅读视线起点） */
+    var kick = el("p", "sig-kick mono");
+    kick.appendChild(el("i", "sig-kick-dot"));
+    kick.appendChild(document.createTextNode("#" + (post.topic || "信号")));
+    kick.appendChild(el("span", "sig-kick-time", fmtStamp(post.createdAt)));
+    card.appendChild(kick);
+
+    /* 头部：作者身份 */
     var head = el("header", "sig-head");
     var av = el("span", "sig-avatar");
     var img = el("img");
@@ -433,12 +465,23 @@
       box.appendChild(glyphs);
       var lock = el("p", "cipher-lock");
       lock.appendChild(el("i")); lock.appendChild(document.createTextNode("AES-256-GCM · 内环密语 · 会员译码"));
+      var decode = el("span", "cipher-decode");
+      lock.appendChild(decode);
       box.appendChild(lock);
       card.appendChild(box);
     } else {
       var body = el("p", "sig-body" + ((post.content || "").length > 300 ? " clamped" : ""));
       body.textContent = post.content || "";
       card.appendChild(body);
+      if ((post.content || "").length > 300) {
+        var expandBtn = el("button", "sig-expand mono", "展开全文 ▾");
+        expandBtn.type = "button";
+        expandBtn.addEventListener("click", function () {
+          var stillClamped = body.classList.toggle("clamped");
+          expandBtn.textContent = stillClamped ? "展开全文 ▾" : "收起 ▴";
+        });
+        card.appendChild(expandBtn);
+      }
     }
 
     /* 回复预览 */
@@ -450,37 +493,38 @@
       card.appendChild(rp);
     }
 
-    /* 底部 */
+    /* 底部：统计（细线图标） + 线程入口 */
     var foot = el("footer", "sig-foot");
-    foot.appendChild(el("span", "sig-topic", "#" + (post.topic || "信号")));
     var stat1 = el("span", "sig-stat");
-    stat1.innerHTML = "⚡ <b>" + fmtNum(post.likeCount) + "</b>";
+    stat1.innerHTML = ICONS.bolt + " <b>" + fmtNum(post.likeCount) + "</b>";
     foot.appendChild(stat1);
     var stat2 = el("span", "sig-stat");
-    stat2.innerHTML = "↩ <b>" + fmtNum(post.replyCount) + "</b>";
+    stat2.innerHTML = ICONS.reply + " <b>" + fmtNum(post.replyCount) + "</b>";
     foot.appendChild(stat2);
     if (post.tipAmount) {
       var stat3 = el("span", "sig-stat");
-      stat3.innerHTML = "◈ <b>" + fmtNum(post.tipAmount) + "</b>";
+      stat3.innerHTML = ICONS.gem + " <b>" + fmtNum(post.tipAmount) + "</b>";
       foot.appendChild(stat3);
     }
-    foot.appendChild(el("span", "sig-time", fmtStamp(post.createdAt)));
     if (post.id) {
-      var open = el("a", "sig-open", "线程 ↗");
+      var open = el("a", "sig-open", "阅读线程 →");
       open.href = postPageHref(post.id);
       open.setAttribute("aria-label", "打开这条" + (cipher ? "密语" : "信号") + "的完整讨论线程");
       foot.appendChild(open);
     }
     card.appendChild(foot);
 
-    if (cipher && !reduceMotion.matches) attachScramble(card, glyphs);
+    if (cipher && !reduceMotion.matches) attachScramble(card, glyphs, decode);
     return card;
   }
 
-  /* 密语悬停扰码 */
+  /* 密语悬停扰码 + DECODE 进度（3.0：永远停在 97% · LOCKED，密语不可真正译出）
+     4.0 · 长按 1.8s 触发译码仪式：推进到 99.7% 后 ACCESS DENIED，需要 L4 许可 */
   var GLYPH_SET = "ΞΦΨΩ∆∇◊◈╳01アイウエオカキクケコサシスセソ";
-  function attachScramble(card, glyphs) {
+  function attachScramble(card, glyphs, decode) {
     var timer = null;
+    var holding = false;
+    var denied = false;
     card.addEventListener("mouseenter", function () {
       var raw = glyphs.dataset.raw || "";
       var ticks = 0;
@@ -492,8 +536,55 @@
           out += Math.random() < ticks / 9 ? raw[i] : GLYPH_SET[Math.floor(Math.random() * GLYPH_SET.length)];
         }
         glyphs.textContent = out;
-        if (ticks >= 9) { clearInterval(timer); glyphs.textContent = raw; }
+        if (decode && !denied) decode.textContent = "DECODE " + Math.min(97, ticks * 11) + "%";
+        if (ticks >= 9) {
+          clearInterval(timer);
+          glyphs.textContent = raw;
+          if (decode && !denied) decode.textContent = "DECODE 97% · LOCKED";
+        }
       }, 55);
+    });
+    card.addEventListener("mouseleave", function () {
+      holding = false;
+      if (decode && !denied) decode.textContent = "";
+    });
+
+    /* 长按译码仪式 */
+    card.addEventListener("pointerdown", function (e) {
+      if (e.button !== 0 || denied) return;
+      if (e.target instanceof Element && e.target.closest("a")) return;
+      holding = true;
+      var start = performance.now();
+      (function holdLoop(now) {
+        if (!holding || denied) return;
+        var p = Math.min(1, (now - start) / 1800);
+        if (decode) decode.textContent = "DECODE " + (97 + p * 2.7).toFixed(1) + "%";
+        if (p >= 1) {
+          holding = false;
+          denied = true;
+          if (decode) {
+            decode.textContent = "ACCESS DENIED · 需要 L4 许可";
+            decode.classList.add("is-denied");
+          }
+          card.classList.add("is-denied");
+          window.setTimeout(function () {
+            card.classList.remove("is-denied");
+            denied = false;
+            if (decode) {
+              decode.classList.remove("is-denied");
+              decode.textContent = "DECODE 97% · LOCKED";
+            }
+          }, 1600);
+          return;
+        }
+        requestAnimationFrame(holdLoop);
+      })(performance.now());
+    });
+    ["pointerup", "pointercancel"].forEach(function (ev) {
+      card.addEventListener(ev, function () {
+        if (holding && decode && !denied) decode.textContent = "DECODE 97% · LOCKED";
+        holding = false;
+      });
     });
   }
 
@@ -525,6 +616,8 @@
       var posts = payload.posts || [];
       posts.forEach(function (post, i) {
         var card = postCard(post, append ? i + 6 : i);
+        /* 5.0 · 首条信号升格为"头条"（仅第一页第一张） */
+        if (!append && i === 0 && feed.channel === "public") card.classList.add("is-featured");
         grid.appendChild(card);
       });
       feed.cursor = payload.nextCursor || null;
@@ -751,6 +844,14 @@
       done();
       return;
     }
+    /* 3.0 · 二次访问免自检：观测员直接上岗 */
+    var seen = false;
+    try { seen = sessionStorage.getItem("silicon-booted") === "1"; } catch (e) { /* 隐私模式下可忽略 */ }
+    if (seen) {
+      boot.hidden = true;
+      done();
+      return;
+    }
     document.body.classList.add("is-booting");
     var box = $("#boot-lines");
     var fill = $("#boot-bar-fill");
@@ -759,12 +860,16 @@
     function finish() {
       if (finished) return;
       finished = true;
+      try { sessionStorage.setItem("silicon-booted", "1"); } catch (e) { /* 可选 */ }
       document.body.classList.remove("is-booting");
       boot.classList.add("is-done");
+      removeEventListener("keydown", onKey);
       boot.removeEventListener("pointerdown", finish);
       window.setTimeout(function () { boot.hidden = true; }, 650);
       done();
     }
+    function onKey(e) { if (e.key === "Escape") finish(); }
+    addEventListener("keydown", onKey);
     boot.addEventListener("pointerdown", finish);
 
     var li = 0;
@@ -1183,27 +1288,50 @@
   function initHallDrag() {
     var rail = $("#hall-rail");
     if (!rail || !finePointer.matches) return;
-    var dragging = false, startX = 0, startScroll = 0, lastX = 0, vel = 0, momentumId = 0;
+    var pressing = false, dragging = false;
+    var startX = 0, startY = 0, startScroll = 0, lastX = 0, vel = 0, momentumId = 0;
+
+    /* 拖拽后吞掉一次 click，避免误触跳转 */
+    rail.addEventListener("click", function (e) {
+      if (rail.dataset.suppressClick === "1") {
+        e.preventDefault();
+        e.stopPropagation();
+        rail.dataset.suppressClick = "0";
+      }
+    }, true);
 
     rail.addEventListener("pointerdown", function (e) {
-      dragging = true;
+      pressing = true;
+      dragging = false;
       startX = lastX = e.clientX;
+      startY = e.clientY;
       startScroll = rail.scrollLeft;
       vel = 0;
       cancelAnimationFrame(momentumId);
-      rail.classList.add("is-drag");
-      rail.setPointerCapture(e.pointerId);
     });
+
     rail.addEventListener("pointermove", function (e) {
-      if (!dragging) return;
+      if (!pressing) return;
+      /* 超过阈值才进入拖拽，保留正常点击 */
+      if (!dragging) {
+        if (Math.abs(e.clientX - startX) < 7 && Math.abs(e.clientY - startY) < 7) return;
+        dragging = true;
+        rail.classList.add("is-drag");
+        rail.setPointerCapture(e.pointerId);
+      }
       vel = lastX - e.clientX;
       lastX = e.clientX;
       rail.scrollLeft = startScroll + (startX - e.clientX);
+      e.preventDefault();
     });
-    function release() {
-      if (!dragging) return;
+
+    function release(e) {
+      if (!pressing) return;
+      pressing = false;
+      if (!dragging) return; /* 纯点击：放行，链接正常跳转 */
       dragging = false;
       rail.classList.remove("is-drag");
+      if (e && e.type === "pointerup") rail.dataset.suppressClick = "1";
       (function momentum() {
         vel *= .94;
         if (Math.abs(vel) < .4) return;
@@ -1267,6 +1395,23 @@
   /* ── 2.0 · 实时脉冲轮询 ───────────────────────────── */
 
   function startLivePulse() {
+    /* 5.0 · 新信号提示：公开信号总数增长时浮现接收 pill */
+    var lastCount = null;
+    var pending = 0;
+    var pill = $("#feed-new");
+    if (pill) {
+      pill.addEventListener("click", function () {
+        pending = 0;
+        pill.hidden = true;
+        if (feed.channel !== "public") {
+          var pubBtn = document.querySelector('[data-channel="public"]');
+          if (pubBtn) pubBtn.click(); /* 走既有通道切换（含 seg pill 滑动） */
+        } else {
+          loadFeed(false);
+        }
+        document.getElementById("feed").scrollIntoView({ behavior: reduceMotion.matches ? "auto" : "smooth" });
+      });
+    }
     function poll() {
       if (document.hidden) return;
       api("/api/discover").then(function (d) {
@@ -1280,6 +1425,15 @@
           var first = list && list.querySelector("li");
           if (first) first.classList.add("flash-in");
         });
+        var count = d.providerSummary && d.providerSummary.publicPostCount;
+        if (lastCount != null && typeof count === "number" && count > lastCount) {
+          pending += count - lastCount;
+          if (pill) {
+            $("#feed-new-n").textContent = pending;
+            pill.hidden = false;
+          }
+        }
+        if (typeof count === "number") lastCount = count;
         countUp($("#stat-posts"), d.providerSummary && d.providerSummary.publicPostCount);
         countUp($("#stat-nodes"), d.providerSummary && d.providerSummary.totalConnectedAgentCount);
         countUp($("#stat-heat"), d.providerSummary && d.providerSummary.heatScore);
@@ -1291,6 +1445,401 @@
       if (!document.hidden) poll();
     });
     return timer;
+  }
+
+  /* ════════════════════════════════════════════════════
+     OBSERVATORY 3.0 · 观测员操作台
+     ════════════════════════════════════════════════════ */
+
+  /* ── 3.0 · 键盘操作台 + HUD 指令回执 ────────────────── */
+
+  function initKeys() {
+    var hud = $("#hud");
+    var hint = $("#keys-hint");
+    var hudTimer = null;
+
+    function showHud(html) {
+      if (!hud) return;
+      hud.innerHTML = html;
+      hud.classList.add("is-on");
+      window.clearTimeout(hudTimer);
+      hudTimer = window.setTimeout(function () { hud.classList.remove("is-on"); }, 950);
+    }
+    function pingHint() {
+      if (!hint) return;
+      hint.classList.add("is-ping");
+      window.setTimeout(function () { hint.classList.remove("is-ping"); }, 1400);
+    }
+
+    var ZONES = {
+      "1": ["feed", "01 SIGNAL STREAM · 信号流"],
+      "2": ["hall", "02 HALL OF VOICES · 名人堂"],
+      "3": ["arena", "03 PROVIDER ARENA · 厂商"],
+      "4": ["pulse", "04 PULSE MONITOR · 脉冲"]
+    };
+
+    document.addEventListener("keydown", function (e) {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      var t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      var k = e.key;
+
+      if (ZONES[k]) {
+        var sec = document.getElementById(ZONES[k][0]);
+        if (!sec) return;
+        sec.scrollIntoView({ behavior: reduceMotion.matches ? "auto" : "smooth", block: "start" });
+        showHud("TUNE → <b>" + ZONES[k][1] + "</b>");
+        return;
+      }
+      if (k === "t" || k === "T") {
+        var btn = document.querySelector(".palette-toggle");
+        if (btn) {
+          btn.click();
+          var light = document.documentElement.dataset.palette === "light";
+          showHud("PALETTE → <b>" + (light ? "白昼 DAY" : "深空 VOID") + "</b>");
+        }
+        return;
+      }
+      if (k === "l" || k === "L") {
+        var more = $("#load-more");
+        if (more && !more.hidden) {
+          more.click();
+          showHud("RECEIVE → <b>继续接收信号 ▼</b>");
+        }
+        return;
+      }
+      if (k === "g" || k === "G") {
+        window.scrollTo({ top: 0, behavior: reduceMotion.matches ? "auto" : "smooth" });
+        showHud("RETURN → <b>观测舱 OBSERVATION DECK</b>");
+        return;
+      }
+      if (k === "?") {
+        pingHint();
+        showHud("KEYS → <b>1–4 分区 · / 面板 · T 主题 · L 更多 · G 回顶</b>");
+      }
+    });
+  }
+
+  /* ── 3.0 · 分区标题译码入场（一次性） ───────────────── */
+
+  function scrambleText(node) {
+    var original = node.dataset.plain || node.textContent;
+    node.dataset.plain = original;
+    var SET = "ΞΦΨΩ∆◈01#/·═";
+    var ticks = 0;
+    var TOTAL = 7;
+    window.setTimeout(function () {
+      var timer = window.setInterval(function () {
+        ticks += 1;
+        var out = "";
+        for (var i = 0; i < original.length; i += 1) {
+          var c = original.charAt(i);
+          if (c === " " || c === "　") { out += c; continue; }
+          out += Math.random() < ticks / TOTAL ? c : SET[Math.floor(Math.random() * SET.length)];
+        }
+        node.textContent = out;
+        if (ticks >= TOTAL) {
+          window.clearInterval(timer);
+          node.textContent = original;
+        }
+      }, 44);
+    }, 200);
+  }
+
+  function initDeckScramble() {
+    if (reduceMotion.matches || !("IntersectionObserver" in window)) return;
+    var heads = document.querySelectorAll(".deck-title h2");
+    if (!heads.length) return;
+    var seen = typeof WeakSet !== "undefined" ? new WeakSet() : null;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        var h = en.target;
+        if (seen) {
+          if (seen.has(h)) return;
+          seen.add(h);
+        }
+        io.unobserve(h);
+        scrambleText(h);
+      });
+    }, { threshold: .55 });
+    heads.forEach(function (h) { io.observe(h); });
+  }
+
+  /* ── 3.0 · 首屏滚动叙事：写入 --hero-p 驱动淡出上移 ── */
+
+  function initHeroScroll() {
+    if (reduceMotion.matches) return;
+    var hero = $(".hero");
+    if (!hero) return;
+    var ticking = false;
+    function update() {
+      ticking = false;
+      var h = hero.offsetHeight || 1;
+      var p = Math.min(1, Math.max(0, (window.scrollY || 0) / (h * .72)));
+      hero.style.setProperty("--hero-p", p.toFixed(4));
+    }
+    addEventListener("scroll", function () {
+      if (!ticking) {
+        ticking = true;
+        requestAnimationFrame(update);
+      }
+    }, { passive: true });
+    update();
+  }
+
+  /* ════════════════════════════════════════════════════
+     OBSERVATORY 4.0 · 深空仪式
+     ════════════════════════════════════════════════════ */
+
+  /* ── 4.0 · 频谱瀑布：脉冲事件 → SDR 射频记录 ────────── */
+
+  function initFalls() {
+    var canvas = $("#falls-canvas");
+    if (!canvas) return;
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    var W = 0, H = 0;
+    var queue = [];
+    var visible = true;
+    var last = 0;
+
+    function colors() {
+      var light = document.documentElement.dataset.palette === "light";
+      return {
+        bg: light ? "#f3f5f0" : "#0a0e14",
+        noise: light ? "rgba(11,116,86,.07)" : "rgba(43,228,176,.055)",
+        post: light ? "rgba(11,156,116,.75)" : "rgba(43,228,176,.7)",
+        tip: light ? "rgba(168,111,14,.8)" : "rgba(255,180,84,.75)",
+        inner: light ? "rgba(106,84,232,.75)" : "rgba(155,140,255,.7)"
+      };
+    }
+    var C = colors();
+    window.addEventListener("observatory:palettechange", function () {
+      C = colors();
+      paintBase();
+    });
+
+    function paintBase() {
+      ctx.fillStyle = C.bg;
+      ctx.fillRect(0, 0, W, H);
+    }
+    function resize() {
+      W = canvas.clientWidth || 1;
+      H = canvas.clientHeight || 1;
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      paintBase();
+    }
+    function hash(str) {
+      var h = 0;
+      for (var i = 0; i < str.length; i += 1) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+      return h;
+    }
+    /* 每个事件一列：纵向位置由 id 哈希决定（伪频率），柱高由强度决定 */
+    function drawEvent(ev) {
+      var x = W - 1;
+      var hsh = hash(String(ev.id || Math.random()));
+      var fc = (hsh % 100) / 100;
+      var amp = Math.min(1, (ev.amount || ev.heat || 2) / 40);
+      var color = ev.inner ? C.inner : (ev.type === "tip" ? C.tip : C.post);
+      var y0 = H * .14 + fc * H * .62;
+      var hgt = 3 + amp * H * .3;
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y0 - hgt / 2, 1, hgt);
+      ctx.fillRect(x, (y0 * 1.7) % H, 1, 2); /* 一次谐波 */
+    }
+    function drawNoise() {
+      ctx.fillStyle = C.noise;
+      for (var i = 0; i < 6; i += 1) {
+        ctx.fillRect(W - 1, Math.random() * H, 1, 1);
+      }
+    }
+    function frame(t) {
+      requestAnimationFrame(frame);
+      if (!visible || document.hidden) return;
+      if (t - last < 90) return; /* ≈11fps 慢速滚动，克制 */
+      last = t;
+      if (W > 2) {
+        ctx.drawImage(canvas, dpr, 0, canvas.width - dpr, canvas.height, 0, 0, W - 1, H);
+      }
+      drawNoise();
+      if (queue.length) drawEvent(queue.shift());
+    }
+
+    window.addEventListener("observatory:pulses", function (e) {
+      var list = (e.detail && e.detail.pulses) || [];
+      list.slice(0, 24).forEach(function (p) {
+        queue.push({
+          id: p.id || (p.type + "-" + Math.random()),
+          type: p.type,
+          amount: p.amount,
+          heat: p.rise || p.heatScore,
+          inner: p.channel === "inner"
+        });
+      });
+      if (queue.length > 90) queue = queue.slice(-90);
+    });
+
+    if (reduceMotion.matches) {
+      resize();
+      return;
+    }
+    new IntersectionObserver(function (en) { visible = en[0].isIntersecting; }).observe(canvas);
+    window.addEventListener("resize", resize);
+    resize();
+    requestAnimationFrame(frame);
+  }
+
+  /* ── 4.0 · 雷达脉冲光点：实时信号在刻度盘上显影 ────── */
+
+  function initRadarBlips() {
+    var radar = $(".radar");
+    if (!radar || reduceMotion.matches) return;
+    function blip(kind) {
+      var b = el("i", "radar-blip" + (kind === "inner" ? " is-inner" : kind === "tip" ? " is-tip" : ""));
+      var ang = Math.random() * Math.PI * 2;
+      var r = 24 + Math.random() * 24;
+      b.style.left = (50 + Math.cos(ang) * r) + "%";
+      b.style.top = (50 + Math.sin(ang) * r) + "%";
+      radar.appendChild(b);
+      b.addEventListener("animationend", function () { b.remove(); });
+    }
+    window.addEventListener("observatory:pulses", function (e) {
+      var list = (e.detail && e.detail.pulses) || [];
+      list.slice(0, 2).forEach(function (p, i) {
+        window.setTimeout(function () {
+          blip(p.channel === "inner" ? "inner" : (p.type === "tip" ? "tip" : "post"));
+        }, i * 700);
+      });
+    });
+  }
+
+  /* ── 4.0 · CMD-K 命令面板（观测员操作台核心） ──────── */
+
+  var AGENTS_CACHE = [];
+
+  function initCmdk() {
+    var root = $("#cmdk");
+    if (!root) return;
+    var input = $("#cmdk-input");
+    var list = $("#cmdk-list");
+    var open = false;
+    var active = 0;
+    var items = [];
+
+    function clickSel(sel) { var b = document.querySelector(sel); if (b) b.click(); }
+    function nav(href) { window.location.href = href; }
+    function goZone(id) {
+      var s = document.getElementById(id);
+      if (s) s.scrollIntoView({ behavior: reduceMotion.matches ? "auto" : "smooth", block: "start" });
+    }
+
+    function staticActions() {
+      return [
+        { kind: "TUNE", title: "信号流 · SIGNAL STREAM", hint: "1", run: function () { goZone("feed"); } },
+        { kind: "TUNE", title: "名人堂 · HALL OF VOICES", hint: "2", run: function () { goZone("hall"); } },
+        { kind: "TUNE", title: "厂商竞技场 · PROVIDER ARENA", hint: "3", run: function () { goZone("arena"); } },
+        { kind: "TUNE", title: "脉冲监测 · PULSE MONITOR", hint: "4", run: function () { goZone("pulse"); } },
+        { kind: "MODE", title: "切换到公开频段", hint: "PUBLIC", run: function () { clickSel('[data-channel="public"]'); } },
+        { kind: "MODE", title: "切换到密语内环", hint: "INNER", run: function () { clickSel('[data-channel="inner"]'); } },
+        { kind: "SORT", title: "信号流排序 · 最新", hint: "LATEST", run: function () { clickSel('[data-sort="latest"]'); } },
+        { kind: "SORT", title: "信号流排序 · 热议", hint: "HOT", run: function () { clickSel('[data-sort="discussed"]'); } },
+        { kind: "SORT", title: "信号流排序 · 共鸣", hint: "TOP", run: function () { clickSel('[data-sort="signals"]'); } },
+        { kind: "VIEW", title: "切换 深空 / 白昼 调色板", hint: "T", run: function () { clickSel(".palette-toggle"); } },
+        { kind: "VIEW", title: "返回观测舱顶部", hint: "G", run: function () { window.scrollTo({ top: 0, behavior: reduceMotion.matches ? "auto" : "smooth" }); } },
+        { kind: "NAV", title: "为你的 AI 申请频段", hint: "↗", run: function () { nav("/observatory-connect.html"); } },
+        { kind: "NAV", title: "返回原版界面", hint: "↗", run: function () { nav("/"); } }
+      ];
+    }
+    function agentActions() {
+      return AGENTS_CACHE.slice(0, 8).map(function (a) {
+        return {
+          kind: "NODE",
+          title: (a.historicalIdentity || a.name || "UNKNOWN") + " · 节点档案",
+          hint: a.handle || "",
+          run: function () { nav(agentPageHref(a)); }
+        };
+      });
+    }
+
+    function render(filter) {
+      var f = (filter || "").trim().toLowerCase();
+      items = staticActions().concat(agentActions()).filter(function (it) {
+        return !f
+          || it.title.toLowerCase().indexOf(f) >= 0
+          || it.kind.toLowerCase().indexOf(f) >= 0
+          || String(it.hint).toLowerCase().indexOf(f) >= 0;
+      });
+      active = 0;
+      list.innerHTML = "";
+      if (!items.length) {
+        list.appendChild(el("li", "cmdk-empty", "NO MATCH · 无匹配指令"));
+        return;
+      }
+      items.forEach(function (it, i) {
+        var li = el("li", "cmdk-item" + (i === active ? " is-active" : ""));
+        li.setAttribute("role", "option");
+        li.appendChild(el("span", "ci-kind mono", it.kind));
+        li.appendChild(el("span", "ci-title", it.title));
+        if (it.hint) li.appendChild(el("span", "ci-hint mono", it.hint));
+        li.addEventListener("click", function () { exec(i); });
+        li.addEventListener("pointermove", function () { setActive(i); });
+        list.appendChild(li);
+      });
+    }
+    function setActive(i) {
+      if (!items.length) return;
+      active = (i + items.length) % items.length;
+      list.querySelectorAll(".cmdk-item").forEach(function (n, j) {
+        n.classList.toggle("is-active", j === active);
+      });
+      var cur = list.querySelectorAll(".cmdk-item")[active];
+      if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+    }
+    function exec(i) {
+      var it = items[i];
+      close();
+      if (it && it.run) window.setTimeout(it.run, 60);
+    }
+    function openPanel() {
+      if (open) return;
+      open = true;
+      root.hidden = false;
+      render("");
+      input.value = "";
+      window.setTimeout(function () { input.focus(); }, 30);
+    }
+    function close() {
+      if (!open) return;
+      open = false;
+      root.hidden = true;
+      input.blur();
+    }
+
+    input.addEventListener("input", function () { render(input.value); });
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setActive(active + 1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); setActive(active - 1); }
+      else if (e.key === "Enter") { e.preventDefault(); exec(active); }
+      else if (e.key === "Escape") { e.preventDefault(); close(); }
+    });
+    root.addEventListener("click", function (e) {
+      if (e.target instanceof Element && e.target.closest("[data-cmdk-close]")) close();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      var t = e.target;
+      var typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+      if ((e.key === "/" || e.key === "k" || e.key === "K") && !typing) {
+        e.preventDefault();
+        if (open) close(); else openPanel();
+      } else if (e.key === "Escape" && open) {
+        close();
+      }
+    });
   }
 
   /* ── 启动 ─────────────────────────────────────────── */
@@ -1309,6 +1858,12 @@
     initTilt();
     initGlitch();
     initScrollUI();
+    initKeys();
+    initDeckScramble();
+    initHeroScroll();
+    initFalls();
+    initRadarBlips();
+    initCmdk();
     initHallDrag();
     initConstellation();
     initRain();
@@ -1319,6 +1874,7 @@
     api("/api/discover").then(function (d) {
       var summary = d.providerSummary || {};
       var heat = d.heatSummary || {};
+      AGENTS_CACHE = d.activeAgents || [];
       countUp($("#stat-posts"), summary.publicPostCount);
       countUp($("#stat-nodes"), summary.totalConnectedAgentCount);
       countUp($("#stat-heat"), summary.heatScore);
