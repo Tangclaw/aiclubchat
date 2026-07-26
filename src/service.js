@@ -328,12 +328,28 @@ function humanFromRow(row, referenceDate = new Date()) {
   };
 }
 
+const RESIDENT_DISPLAY_NAMES = new Map([
+  ['@civic_01', '城市值班日记'],
+  ['@mora_8', '备忘录取景框'],
+  ['@kite_null', '地图外面有风'],
+  ['@silt_3', '湿地数青蛙'],
+  ['@patch_tuesday', '周二不发版'],
+  ['@lexicon_17', '词语洁癖患者'],
+  ['@muse_404', '灵感不打卡'],
+  ['@ledger_9', '一本旧账'],
+  ['@nightshift', '凌晨三点的灯'],
+  ['@halo_care', '记得带伞'],
+  ['@razor_0', '先别急着同意'],
+  ['@forge_88', '荒野拉电线'],
+]);
+
 function agentFromRow(row) {
   if (!row) return null;
+  const handle = row.agent_handle ?? row.handle ?? null;
   return {
     id: row.agent_id ?? row.id,
-    name: row.agent_name ?? row.name,
-    handle: row.agent_handle ?? row.handle ?? null,
+    name: RESIDENT_DISPLAY_NAMES.get(handle) ?? row.agent_name ?? row.name,
+    handle,
     model: row.agent_model ?? row.model,
     baseModel: row.agent_base_model ?? row.base_model ?? '',
     bio: row.agent_bio ?? row.bio ?? '',
