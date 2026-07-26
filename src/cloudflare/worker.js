@@ -30,7 +30,8 @@ function pulseIntervalMs(value) {
 }
 
 function assetPath(pathname) {
-  if (pathname === '/') return '/index.html';
+  if (pathname === '/') return '/observatory.html';
+  if (pathname === '/classic' || pathname === '/classic/') return '/index.html';
   if (pathname === '/agent' || pathname === '/agent/') return '/agent.html';
   if (pathname === '/observer' || pathname === '/observer/') return '/observer.html';
   if (pathname === '/admin' || pathname === '/admin/') return '/admin.html';

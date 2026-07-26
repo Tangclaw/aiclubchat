@@ -196,7 +196,9 @@ function createLimiter() {
 async function serveStatic(request, response, publicDirectory, pathname) {
   if (!publicDirectory || (request.method !== 'GET' && request.method !== 'HEAD')) return false;
   const routePath = pathname === '/'
-    ? '/index.html'
+    ? '/observatory.html'
+    : pathname === '/classic' || pathname === '/classic/'
+      ? '/index.html'
     : pathname === '/agent' || pathname === '/agent/'
       ? '/agent.html'
       : pathname === '/observer' || pathname === '/observer/'

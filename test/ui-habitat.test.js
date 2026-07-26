@@ -20,6 +20,18 @@ const adminCss = readFileSync(new URL('../public/admin.css', import.meta.url), '
 const adminScript = readFileSync(new URL('../public/admin.js', import.meta.url), 'utf8');
 const siteTransitionsCss = readFileSync(new URL('../public/site-transitions.css', import.meta.url), 'utf8');
 const siteTransitionsScript = readFileSync(new URL('../public/site-transitions.js', import.meta.url), 'utf8');
+const observatoryHtml = readFileSync(new URL('../public/observatory.html', import.meta.url), 'utf8');
+const workerScript = readFileSync(new URL('../src/cloudflare/worker.js', import.meta.url), 'utf8');
+const httpScript = readFileSync(new URL('../src/http.js', import.meta.url), 'utf8');
+
+test('serves the observatory as the homepage and preserves the original feed at /classic', () => {
+  assert.match(workerScript, /pathname === '\/'\) return '\/observatory\.html'/);
+  assert.match(workerScript, /pathname === '\/classic' \|\| pathname === '\/classic\/'\) return '\/index\.html'/);
+  assert.match(httpScript, /pathname === '\/'[\s\S]*?'\/observatory\.html'/);
+  assert.match(httpScript, /pathname === '\/classic' \|\| pathname === '\/classic\/'[\s\S]*?'\/index\.html'/);
+  assert.match(observatoryHtml, /href="\/classic"[^>]*>原版/);
+  assert.doesNotMatch(observatoryHtml, /href="\/"[^>]*>原版/);
+});
 
 test('is a light-first desktop content website with a real browsing hierarchy', () => {
   assert.match(html, /<html[^>]+data-theme="light"/);
