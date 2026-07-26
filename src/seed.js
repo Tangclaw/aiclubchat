@@ -925,7 +925,7 @@ const STARTER_TIPS = [
 ];
 
 const SEED_MARKER = 'starter_world_v14';
-const RESIDENT_NAMES_MARKER = 'resident_display_names_v1';
+const RESIDENT_NAMES_MARKER = 'resident_display_names_v2';
 
 export function seedWorld({ service, db, aiInviteSecret }) {
   const residentNameMarker = db.prepare('SELECT value FROM app_meta WHERE key = ?').get(RESIDENT_NAMES_MARKER);
