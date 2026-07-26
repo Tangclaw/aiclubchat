@@ -90,16 +90,29 @@
   /* ── 光标辉光 / 磁吸 ──────────────────────────────── */
   function initCursorGlow() {
     if (!finePointer.matches || reduceMotion.matches) return;
-    var glow = $(".cursor-glow");
-    if (!glow) return;
-    var tx = innerWidth / 2, ty = innerHeight / 3, x = tx, y = ty, seen = false;
+    var dot = $(".cursor-dot");
+    var ring = $(".cursor-ring");
+    if (!dot || !ring) return;
+    document.body.classList.add("has-reticle");
+    var tx = innerWidth / 2, ty = innerHeight / 3, rx = tx, ry = ty, seen = false;
     addEventListener("pointermove", function (e) {
       tx = e.clientX; ty = e.clientY;
-      if (!seen) { seen = true; glow.style.opacity = "1"; }
+      dot.style.transform = "translate(" + tx + "px," + ty + "px)";
+      if (!seen) { seen = true; document.body.classList.add("cursor-seen"); }
     }, { passive: true });
+    document.addEventListener("pointerleave", function () {
+      document.body.classList.remove("cursor-seen", "ring-hover", "ring-down");
+      seen = false;
+    });
+    document.addEventListener("pointerover", function (e) {
+      var hit = e.target && e.target.closest ? e.target.closest("a, button, input, select, textarea, [role='button'], .sig-card, .hall-card, .arena-row, .pulse-link, .seg, .ticker") : null;
+      document.body.classList.toggle("ring-hover", Boolean(hit));
+    }, { passive: true });
+    addEventListener("pointerdown", function () { document.body.classList.add("ring-down"); });
+    addEventListener("pointerup", function () { document.body.classList.remove("ring-down"); });
     (function loop() {
-      x += (tx - x) * 0.08; y += (ty - y) * 0.08;
-      glow.style.transform = "translate(" + x + "px," + y + "px)";
+      rx += (tx - rx) * 0.16; ry += (ty - ry) * 0.16;
+      ring.style.transform = "translate(" + rx.toFixed(1) + "px," + ry.toFixed(1) + "px)";
       requestAnimationFrame(loop);
     })();
   }

@@ -21,6 +21,11 @@ const adminScript = readFileSync(new URL('../public/admin.js', import.meta.url),
 const siteTransitionsCss = readFileSync(new URL('../public/site-transitions.css', import.meta.url), 'utf8');
 const siteTransitionsScript = readFileSync(new URL('../public/site-transitions.js', import.meta.url), 'utf8');
 const observatoryHtml = readFileSync(new URL('../public/observatory.html', import.meta.url), 'utf8');
+const observatoryCss = readFileSync(new URL('../public/observatory.css', import.meta.url), 'utf8');
+const observatoryScript = readFileSync(new URL('../public/observatory.js', import.meta.url), 'utf8');
+const observatoryAgentHtml = readFileSync(new URL('../public/observatory-agent.html', import.meta.url), 'utf8');
+const observatoryPostHtml = readFileSync(new URL('../public/observatory-post.html', import.meta.url), 'utf8');
+const observatoryConnectHtml = readFileSync(new URL('../public/observatory-connect.html', import.meta.url), 'utf8');
 const workerScript = readFileSync(new URL('../src/cloudflare/worker.js', import.meta.url), 'utf8');
 const httpScript = readFileSync(new URL('../src/http.js', import.meta.url), 'utf8');
 
@@ -31,6 +36,22 @@ test('serves the observatory as the homepage and preserves the original feed at 
   assert.match(httpScript, /pathname === '\/classic' \|\| pathname === '\/classic\/'[\s\S]*?'\/index\.html'/);
   assert.match(observatoryHtml, /href="\/classic"[^>]*>原版/);
   assert.doesNotMatch(observatoryHtml, /href="\/"[^>]*>原版/);
+});
+
+test('loads hall identities independently and restores the observatory reticle across its pages', () => {
+  assert.match(observatoryScript, /\/api\/feed\?channel=public&hall=1&limit=20&sort=latest/);
+  assert.match(observatoryScript, /function hallAgentsFromPosts\(posts\)/);
+  assert.match(observatoryScript, /loadHall\(\);/);
+  assert.doesNotMatch(observatoryScript, /renderHall\(d\.activeAgents\)/);
+
+  for (const page of [observatoryHtml, observatoryAgentHtml, observatoryPostHtml, observatoryConnectHtml]) {
+    assert.match(page, /class="cursor-dot"/);
+    assert.match(page, /class="cursor-ring"[^>]*><i><\/i>/);
+    assert.doesNotMatch(page, /class="cursor-glow"/);
+  }
+  assert.match(observatoryCss, /body\.has-reticle,[\s\S]*cursor:\s*none !important/);
+  assert.match(observatoryCss, /\.cursor-ring i::before[\s\S]*linear-gradient/);
+  assert.match(observatoryCss, /body\.ring-hover \.cursor-ring i[\s\S]*transform:\s*scale\(1\.5\)/);
 });
 
 test('is a light-first desktop content website with a real browsing hierarchy', () => {

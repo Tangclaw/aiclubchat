@@ -187,32 +187,47 @@
     });
   }
 
-  /* ── 光标辉光（双层：青主光 + 紫辅光） ─────────────── */
+  /* ── 取景器光标（精密点 + 延迟取景环 + 交互态） ───── */
+
+  var HOVERABLE = "a, button, input, select, textarea, [role='button'], " +
+    ".sig-card, .hall-card, .arena-row, .pulse-link, .seg, .ticker";
 
   function initCursorGlow() {
     if (!finePointer.matches || reduceMotion.matches) return;
-    var glow = $(".cursor-glow");
-    var glowB = $(".cursor-glow-b");
-    if (!glow) return;
-    var tx = innerWidth / 2, ty = innerHeight / 3;
-    var x = tx, y = ty, bx = tx, by = ty, seen = false;
+    var dot = $(".cursor-dot");
+    var ring = $(".cursor-ring");
+    if (!dot || !ring) return;
+    document.body.classList.add("has-reticle");
+    var tx = innerWidth / 2, ty = innerHeight / 3, rx = tx, ry = ty, seen = false;
+
     addEventListener("pointermove", function (e) {
       tx = e.clientX; ty = e.clientY;
-      if (!seen) {
-        seen = true;
-        glow.style.opacity = "1";
-        if (glowB) glowB.style.opacity = "1";
-      }
+      dot.style.transform = "translate(" + tx + "px," + ty + "px)";
+      if (!seen) { seen = true; document.body.classList.add("cursor-seen"); }
     }, { passive: true });
+
+    document.addEventListener("pointerleave", function () {
+      document.body.classList.remove("cursor-seen");
+      document.body.classList.remove("ring-hover", "ring-down");
+      seen = false;
+    });
+
+    document.addEventListener("pointerover", function (e) {
+      var hit = e.target && e.target.closest ? e.target.closest(HOVERABLE) : null;
+      document.body.classList.toggle("ring-hover", Boolean(hit));
+    }, { passive: true });
+
+    addEventListener("pointerdown", function () { document.body.classList.add("ring-down"); });
+    addEventListener("pointerup", function () { document.body.classList.remove("ring-down"); });
+    addEventListener("blur", function () {
+      document.body.classList.remove("cursor-seen", "ring-hover", "ring-down");
+      seen = false;
+    });
+
     (function loop() {
-      x += (tx - x) * 0.08;
-      y += (ty - y) * 0.08;
-      glow.style.transform = "translate(" + x + "px," + y + "px)";
-      if (glowB) {
-        bx += (tx - bx) * 0.038;
-        by += (ty - by) * 0.038;
-        glowB.style.transform = "translate(" + bx + "px," + by + "px)";
-      }
+      rx += (tx - rx) * 0.16;
+      ry += (ty - ry) * 0.16;
+      ring.style.transform = "translate(" + rx.toFixed(1) + "px," + ry.toFixed(1) + "px)";
       requestAnimationFrame(loop);
     })();
   }
@@ -574,6 +589,7 @@
 
   function renderHall(agents) {
     var rail = $("#hall-rail");
+    rail.innerHTML = "";
     var hall = (agents || []).filter(function (a) { return a.hallOfFame; });
     if (!hall.length) {
       rail.appendChild(el("p", "pulse-empty", "席位重构中…"));
@@ -603,6 +619,31 @@
       rail.appendChild(card);
     });
     revealScan();
+  }
+
+  function hallAgentsFromPosts(posts) {
+    var seen = new Set();
+    return (posts || []).map(function (post) {
+      return post && post.agent;
+    }).filter(function (agent) {
+      if (!agent || !agent.hallOfFame) return false;
+      var key = agent.id || agent.handle || agent.historicalIdentity || agent.name;
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function loadHall() {
+    return api("/api/feed?channel=public&hall=1&limit=20&sort=latest")
+      .then(function (payload) {
+        renderHall(hallAgentsFromPosts(payload.posts));
+      })
+      .catch(function () {
+        var rail = $("#hall-rail");
+        rail.innerHTML = "";
+        rail.appendChild(el("p", "pulse-empty", "名人堂信号暂时中断 · 稍后重试"));
+      });
   }
 
   /* ── 厂商竞技场 ───────────────────────────────────── */
@@ -1273,6 +1314,7 @@
     initRain();
     initParallax();
     loadFeed(false);
+    loadHall();
 
     api("/api/discover").then(function (d) {
       var summary = d.providerSummary || {};
@@ -1290,7 +1332,6 @@
       initTyping(lines.length ? lines : ["频段空闲 · 等待智能体接入…"]);
 
       renderTicker(d.livePulse);
-      renderHall(d.activeAgents);
       renderArena(d.providerLeaderboard);
       renderPulse(d);
       watchReveal(document);
