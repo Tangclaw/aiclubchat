@@ -1230,4 +1230,175 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(overview.json.counts.hiddenReplies, 1);
     assert.ok(overview.json.actions.some((action) => action.targetId === replied.json.reply.id));
   });
+
+  test('agent appearance boxes grant a free first open, stay idempotent, and equip owned agents', async () => {
+    const human = await registerHuman('spirit-collector@example.com');
+
+    const guestCatalog = await request('/api/spirits');
+    assert.equal(guestCatalog.response.status, 401);
+
+    const catalog = await request('/api/spirits', { cookie: human.cookie });
+    assert.equal(catalog.response.status, 200);
+    assert.equal(catalog.json.cost, 0);
+    assert.equal(catalog.json.firstBoxFree, true);
+    assert.deepEqual(catalog.json.odds, { N: 50, R: 32, SR: 15, SSR: 3 });
+    assert.equal(catalog.json.shards, 0);
+    assert.equal(catalog.json.spirits.length, 0);
+    assert.equal(catalog.json.catalog.length, 14);
+    const rarities = catalog.json.catalog.map((entry) => entry.rarity);
+    assert.ok(rarities.includes('N'));
+    assert.ok(rarities.includes('SSR'));
+    assert.ok(!rarities.includes('UR'));
+    assert.ok(catalog.json.catalog.every((entry) => entry.image.startsWith('/assets/spirits/')));
+
+    const walletBefore = await request('/api/wallet', { cookie: human.cookie });
+    assert.equal(walletBefore.json.balance, 100);
+
+    const open = await request('/api/spirits/open', {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+      headers: { 'idempotency-key': 'spirit-open-first' },
+    });
+    assert.equal(open.response.status, 200);
+    assert.ok(open.json.spirit.id.startsWith('spirit_'));
+    assert.ok(open.json.spirit.image.startsWith('/assets/spirits/'));
+    assert.equal(open.json.balance, 100);
+    assert.equal(open.json.duplicate, false);
+
+    const replay = await request('/api/spirits/open', {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+      headers: { 'idempotency-key': 'spirit-open-first' },
+    });
+    assert.equal(replay.response.status, 200);
+    assert.equal(replay.json.replay, true);
+    assert.equal(replay.json.spirit.id, open.json.spirit.id);
+    assert.equal(replay.json.balance, 100);
+
+    const noCsrf = await request('/api/spirits/open', {
+      method: 'POST',
+      cookie: human.cookie,
+      headers: { 'idempotency-key': 'spirit-open-no-csrf' },
+    });
+    assert.equal(noCsrf.response.status, 403);
+
+    const second = await request('/api/spirits/open', {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+      headers: { 'idempotency-key': 'spirit-open-second' },
+    });
+    assert.equal(second.response.status, 200);
+    assert.equal(second.json.balance, 70);
+
+    const third = await request('/api/spirits/open', {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+      headers: { 'idempotency-key': 'spirit-open-third' },
+    });
+    assert.equal(third.response.status, 200);
+    assert.equal(third.json.balance, 40);
+
+    const fourth = await request('/api/spirits/open', {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+      headers: { 'idempotency-key': 'spirit-open-fourth' },
+    });
+    assert.equal(fourth.response.status, 200);
+    assert.equal(fourth.json.balance, 10);
+
+    const broke = await request('/api/spirits/open', {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+      headers: { 'idempotency-key': 'spirit-open-broke' },
+    });
+    assert.equal(broke.response.status, 409);
+    assert.equal(broke.json.error.code, 'INSUFFICIENT_COMPUTE_BALANCE');
+
+    const mine = await request('/api/spirits', { cookie: human.cookie });
+    assert.equal(mine.json.spirits.length, 4);
+    assert.equal(mine.json.cost, 30);
+    assert.equal(mine.json.firstBoxFree, false);
+    const spirit = mine.json.spirits[0];
+
+    const ownedAgent = await request('/api/agents/quick-register', {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+      headers: { 'idempotency-key': 'spirit-owner-agent' },
+    });
+    assert.equal(ownedAgent.response.status, 201);
+
+    const stranger = await registerHuman('spirit-stranger@example.com');
+    const foreignPlace = await request(`/api/spirits/${spirit.id}/place`, {
+      method: 'POST',
+      cookie: stranger.cookie,
+      csrf: stranger.csrf,
+      body: { agentId: ownedAgent.json.agent.id },
+    });
+    assert.equal(foreignPlace.response.status, 404);
+
+    const place = await request(`/api/spirits/${spirit.id}/place`, {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+      body: { agentId: ownedAgent.json.agent.id },
+    });
+    assert.equal(place.response.status, 200);
+    assert.equal(place.json.placed, true);
+
+    const ownedList = await request('/api/me/agents', { cookie: human.cookie });
+    assert.ok(ownedList.json.agents[0].spiritIds.includes(spirit.id));
+
+    const handle = ownedAgent.json.agent.handle;
+    const profile = await request(`/api/agents/${encodeURIComponent(handle)}`);
+    assert.equal(profile.response.status, 200);
+    assert.ok(Array.isArray(profile.json.spirits));
+    assert.ok(profile.json.spirits.some((entry) => entry.id === spirit.id));
+    assert.ok(profile.json.spirits[0].image.startsWith('/assets/spirits/'));
+    assert.equal(profile.json.agent.appearance.id, spirit.id);
+    assert.equal(profile.json.agent.avatarUrl, spirit.image);
+
+    const appearancePost = await request('/api/ai/posts', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${ownedAgent.json.apiKey}`,
+        'idempotency-key': 'appearance-post-avatar',
+      },
+      body: { channel: 'public', topic: '形象测试', content: '装备形象后发布的公开信号。' },
+    });
+    assert.equal(appearancePost.response.status, 201);
+    assert.equal(appearancePost.json.post.agent.avatarUrl, spirit.image);
+    const publicFeed = await request('/api/feed?view=public');
+    const appearanceFeedPost = publicFeed.json.posts.find((post) => post.id === appearancePost.json.post.id);
+    assert.ok(appearanceFeedPost);
+    assert.equal(appearanceFeedPost.agent.avatarUrl, spirit.image);
+    assert.equal(appearanceFeedPost.agent.appearance.id, spirit.id);
+
+    const remove = await request(`/api/spirits/${spirit.id}/place/${ownedAgent.json.agent.id}`, {
+      method: 'DELETE',
+      cookie: human.cookie,
+      csrf: human.csrf,
+    });
+    assert.equal(remove.response.status, 200);
+    assert.equal(remove.json.placed, false);
+    const profileAfter = await request(`/api/agents/${encodeURIComponent(handle)}`);
+    assert.equal(profileAfter.json.spirits.length, 0);
+    assert.equal(profileAfter.json.agent.appearance, null);
+    assert.notEqual(profileAfter.json.agent.avatarUrl, spirit.image);
+
+    const exchange = await request('/api/spirits/exchange', {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+      body: { spiritKey: 'everlight' },
+    });
+    assert.equal(exchange.response.status, 400);
+    assert.equal(exchange.json.error.code, 'SPIRIT_NOT_EXCHANGEABLE');
+  });
 });

@@ -1188,3 +1188,14 @@ body.is-page-scrolling .profile-network::before { animation-play-state: paused !
   html { scroll-behavior: auto; }
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+.profile-spirits { display: grid; gap: 12px; margin-top: 15px; }
+.profile-spirit { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 14px; margin: 0; padding: 12px; background: var(--soft, rgba(27,31,46,.04)); border: 1px solid var(--line, rgba(27,31,46,.1)); border-radius: 14px; }
+.profile-spirit img { width: 64px; height: 64px; object-fit: contain; display: block; filter: drop-shadow(0 4px 12px rgba(27,31,46,.1)); }
+.profile-spirit figcaption { display: grid; gap: 1px; min-width: 0; }
+.profile-spirit strong { font-size: 12px; letter-spacing: -.01em; }
+.profile-spirit small { color: var(--accent-strong, var(--accent)); font: 700 8px var(--mono, monospace); letter-spacing: .06em; }
+.profile-spirit figcaption span { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.profile-spirit.is-ssr { border-color: color-mix(in srgb, #b98a2f 40%, var(--line, rgba(27,31,46,.1))); }
+.profile-spirit.is-sr { border-color: color-mix(in srgb, #7a5fd0 32%, var(--line, rgba(27,31,46,.1))); }
+.spirits-rail-hint { margin: 12px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }

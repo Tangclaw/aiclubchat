@@ -111,7 +111,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .guest-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, .72fr); gap: 28px; padding-top: 30px; }
 .auth-card, .member-layout { scroll-margin-top: 92px; }
 .auth-card:focus, .member-layout:focus { outline: none; }
-.guest-copy, .auth-card, .identity-card, .owned-agents-card, .wallet-card, .membership-card, .boundary-card { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 16px; box-shadow: var(--shadow-small); }
+.guest-copy, .auth-card, .identity-card, .owned-agents-card, .wallet-card, .membership-card, .spirits-card, .boundary-card { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 16px; box-shadow: var(--shadow-small); }
 .guest-layout:not([hidden]) > *, .member-layout:not([hidden]) > * { animation: account-card-rise 300ms cubic-bezier(.2, .78, .25, 1) both; }
 .guest-layout:not([hidden]) > *:nth-child(2), .member-layout:not([hidden]) > *:nth-child(2) { animation-delay: 45ms; }
 .member-layout:not([hidden]) > *:nth-child(3) { animation-delay: 90ms; }
@@ -157,7 +157,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .primary-button, .gold-button, .quiet-button, .danger-button { transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease; }
 
 .member-layout { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 18px; padding-top: 30px; }
-.identity-card, .owned-agents-card, .wallet-card, .membership-card, .boundary-card { padding: 26px; }
+.identity-card, .owned-agents-card, .wallet-card, .membership-card, .spirits-card, .boundary-card { padding: 26px; }
 .identity-card { min-height: 0; grid-column: 1 / -1; display: grid; grid-template-columns: minmax(230px, .8fr) minmax(300px, 1.35fr) auto; grid-template-rows: auto auto; align-items: center; gap: 8px 28px; }
 .identity-card .card-heading { grid-column: 1; grid-row: 1; padding: 0; border-bottom: 0; }
 .identity-card .identity-row { grid-column: 1; grid-row: 2; margin: 0; }
@@ -308,6 +308,57 @@ html[data-theme="dark"] .membership-card .primary-button:disabled {
   opacity: .84;
 }
 
+.spirits-card { grid-column: 1 / -1; }
+.spirits-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 28px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+.spirits-heading h2 { margin: 0; font-size: 30px; line-height: 1.05; letter-spacing: -.05em; }
+.spirits-heading > div:first-child > p:last-child { max-width: 620px; margin: 9px 0 0; color: var(--muted); font-size: 12px; }
+.spirits-machine { flex: 0 0 auto; display: grid; justify-items: center; gap: 8px; }
+.spirits-machine > img { width: 56px; height: 56px; border-radius: 14px; box-shadow: var(--shadow-small); }
+.spirits-shards { display: grid; margin: 0; text-align: center; line-height: 1.1; }
+.spirits-shards strong { font-size: 22px; letter-spacing: -.05em; color: var(--accent); }
+.spirits-shards span { margin-top: 2px; color: var(--muted); font: 700 9px var(--mono); }
+.spirits-machine .gold-button { white-space: nowrap; }
+.spirits-machine .gold-button:disabled { opacity: .52; cursor: wait; }
+
+.spirit-reveal { display: grid; grid-template-columns: 128px minmax(0, 1fr); align-items: center; gap: 20px; margin-top: 18px; padding: 20px; background: var(--soft); border: 1px solid var(--line); border-radius: 18px; animation: account-card-rise 320ms cubic-bezier(.2, .78, .25, 1) both; }
+.spirit-reveal img { width: 128px; height: 128px; object-fit: contain; filter: drop-shadow(0 8px 24px rgba(27, 31, 46, .15)); }
+.spirit-reveal .spirit-reveal-name { margin: 0; font-size: 22px; letter-spacing: -.04em; }
+.spirit-reveal .spirit-reveal-meta { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+.spirit-reveal .spirit-reveal-blurb { margin: 8px 0 0; color: var(--ink-soft); font-size: 12px; line-height: 1.6; }
+.spirit-reveal.is-ssr { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.spirit-reveal.is-sr { border-color: color-mix(in srgb, #7a5fd0 30%, var(--line)); }
+
+.spirits-subhead { margin: 26px 0 12px; font-size: 13px; font-weight: 800; letter-spacing: .02em; }
+.spirit-empty { margin: 0; padding: 20px; color: var(--muted); background: var(--soft); border-radius: 12px; text-align: center; font-size: 12px; }
+.spirit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 14px; }
+.spirit-item { position: relative; display: grid; justify-items: center; gap: 8px; padding: 16px 12px 14px; background: var(--soft); border: 1px solid var(--line); border-radius: 16px; text-align: center; transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease; }
+.spirit-item:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--accent) 24%, var(--line)); box-shadow: 0 12px 32px rgba(27, 31, 46, .1); }
+.spirit-item img { width: 108px; height: 108px; object-fit: contain; filter: drop-shadow(0 6px 16px rgba(27, 31, 46, .12)); }
+.spirit-item strong { font-size: 13px; letter-spacing: -.02em; }
+.spirit-item small { color: var(--muted); font: 700 8px var(--mono); letter-spacing: .08em; }
+.spirit-item .spirit-rarity { position: absolute; top: 8px; left: 8px; padding: 2px 6px; border-radius: 999px; font: 800 8px var(--mono); }
+.spirit-rarity-n { color: var(--muted); background: color-mix(in srgb, var(--muted) 10%, var(--surface)); }
+.spirit-rarity-r { color: var(--accent); background: var(--accent-soft); }
+.spirit-rarity-sr { color: #7a5fd0; background: color-mix(in srgb, #7a5fd0 12%, var(--surface)); }
+.spirit-rarity-ssr { color: var(--gold); background: var(--gold-soft); }
+.spirit-item .spirit-serial { position: absolute; top: 8px; right: 8px; color: var(--gold); font: 800 8px var(--mono); }
+.spirit-item .spirit-blurb { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.spirit-item .spirit-place-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 2px; }
+.spirit-item .spirit-place-row button { min-height: 28px; padding: 0 10px; border-radius: 7px; cursor: pointer; font-size: 10px; font-weight: 800; color: var(--accent); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); }
+.spirit-item .spirit-place-row button.is-placed { color: var(--muted); background: var(--surface); border-color: var(--line); }
+.spirit-item.is-locked { opacity: .55; }
+.spirit-item.is-locked img { filter: grayscale(1) brightness(.72) contrast(.9); }
+.spirit-item.is-exchangeable { opacity: 1; cursor: pointer; border-style: dashed; }
+.spirit-item.is-exchangeable img { filter: grayscale(.6) brightness(.85); }
+.spirit-item .spirit-exchange-hint { color: var(--accent); font-size: 10px; font-weight: 800; }
+
+html[data-theme="dark"] .spirit-reveal { background: #171a22; border-color: var(--line-strong); }
+html[data-theme="dark"] .spirit-reveal.is-ssr { background: linear-gradient(145deg, #171a22, color-mix(in srgb, var(--gold-soft) 62%, #151820)); }
+html[data-theme="dark"] .spirit-item { background: #171a22; border-color: var(--line-strong); }
+html[data-theme="dark"] .spirit-item .spirit-place-row button.is-placed { background: #10131a; }
+html[data-theme="dark"] .spirit-rarity-n { background: color-mix(in srgb, var(--muted) 16%, #10131a); }
+html[data-theme="dark"] .spirit-rarity-sr { color: #b3a6ec; background: color-mix(in srgb, #7a5fd0 22%, #10131a); }
+
 .account-footer { width: min(1160px, calc(100% - 40px)); display: flex; justify-content: space-between; gap: 20px; margin: 0 auto; padding: 25px 0 48px; color: var(--muted); border-top: 1px solid var(--line); font-size: 11px; }
 .account-footer p { margin: 0; }
 .account-footer strong { margin-right: 8px; color: var(--ink); }
@@ -354,14 +405,19 @@ html[data-theme="dark"] .membership-card .primary-button:disabled {
   .privacy-mark { display: inline-flex; margin: 12px 0 0; padding: 6px 9px; }
   .privacy-field { top: 34px; right: -8px; bottom: 12px; width: 48%; opacity: .3; }
   .guest-layout, .member-layout { grid-template-columns: 1fr; gap: 12px; padding-top: 20px; }
-  .identity-card, .owned-agents-card, .wallet-card, .membership-card, .boundary-card { grid-column: auto; }
+  .identity-card, .owned-agents-card, .wallet-card, .membership-card, .spirits-card, .boundary-card { grid-column: auto; }
   .identity-card, .boundary-card { display: block; }
   .identity-card .card-heading { padding-bottom: 16px; border-bottom: 1px solid var(--line); }
   .identity-card .identity-row { margin-top: 18px; }
   .identity-card .privacy-copy { margin: 16px 0; padding-left: 0; border-left: 0; }
   .boundary-card > h2, .boundary-card > p:not(.eyebrow), .boundary-card > a { margin-top: 14px; }
   .guest-layout .auth-card { order: -1; }
-  .guest-copy, .auth-card, .identity-card, .owned-agents-card, .wallet-card, .membership-card, .boundary-card { min-height: 0; padding: 22px; border-radius: 14px; }
+  .guest-copy, .auth-card, .identity-card, .owned-agents-card, .wallet-card, .membership-card, .spirits-card, .boundary-card { min-height: 0; padding: 22px; border-radius: 14px; }
+  .spirits-heading { display: grid; gap: 15px; }
+  .spirits-machine { justify-items: start; grid-template-columns: auto 1fr; align-items: center; }
+  .spirits-machine .gold-button { grid-column: 1 / -1; width: 100%; }
+  .spirit-reveal { grid-template-columns: 96px minmax(0, 1fr); }
+  .spirit-reveal img { width: 96px; height: 96px; }
   .owned-agents-heading { display: grid; gap: 15px; }
   .owned-agents-actions { justify-content: space-between; }
   .agent-quota { text-align: left; }

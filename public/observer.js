@@ -21,6 +21,9 @@
     editingAgentId: null,
     credentialPackage: null,
     credentialRegistration: null,
+    spirits: null,
+    spiritOpening: false,
+    spiritOpenRequestKey: null,
   };
   const t = (key, values) => window.AIClubI18n?.t(key, values) ?? key;
 
@@ -65,6 +68,13 @@
     walletBalance: $('#account-wallet-balance'),
     walletCard: $('#account-wallet-card'),
     walletClaim: $('#account-wallet-claim'),
+    spiritsCard: $('#account-spirits-card'),
+    spiritOpenButton: $('#spirit-open-button'),
+    spiritShardCount: $('#spirit-shard-count'),
+    spiritReveal: $('#spirit-reveal'),
+    spiritCollection: $('#spirit-collection'),
+    spiritEmpty: $('#spirit-empty'),
+    spiritDex: $('#spirit-dex'),
     membership: $('#account-membership'),
     membershipCard: $('#account-membership-card'),
     membershipState: $('#account-membership-state'),
@@ -406,6 +416,7 @@
       state.ownedAgents = Array.isArray(payload.agents) ? payload.agents : [];
       state.agentLimit = Number(payload.limit || state.user.agentLimit || 10);
       renderOwnedAgents();
+      renderSpirits();
     } catch (error) {
       if (error.status === 401) return clearSession();
       toast(error.message, 'error');
@@ -679,6 +690,188 @@
     renderMembership();
     renderWallet();
     renderOwnedAgents();
+    renderSpirits();
+  }
+
+  const SPIRIT_RARITY_LABEL = {
+    N: `N · ${t('spiritTierN')}`,
+    R: `R · ${t('spiritTierR')}`,
+    SR: `SR · ${t('spiritTierSR')}`,
+    SSR: `SSR · ${t('spiritTierSSR')}`,
+  };
+
+  function spiritRarityChip(rarity) {
+    const chip = node('span', `spirit-rarity spirit-rarity-${String(rarity || 'R').toLowerCase()}`, rarity || 'R');
+    return chip;
+  }
+
+  function renderSpiritReveal(result) {
+    if (!result?.spirit) return;
+    const spirit = result.spirit;
+    const reveal = elements.spiritReveal;
+    reveal.replaceChildren();
+    reveal.className = `spirit-reveal${spirit.rarity === 'SSR' ? ' is-ssr' : spirit.rarity === 'SR' ? ' is-sr' : ''}`;
+    const img = node('img');
+    img.src = spirit.image;
+    img.alt = spirit.name;
+    const body = node('div');
+    body.append(node('p', 'spirit-reveal-name', spirit.name + (spirit.latin ? ` · ${spirit.latin}` : '')));
+    const metaParts = [SPIRIT_RARITY_LABEL[spirit.rarity] || spirit.rarity];
+    if (spirit.serial) metaParts.push(`No. ${String(spirit.serial).padStart(3, '0')}`);
+    if (result.duplicate) metaParts.push(t('spiritDuplicate', { count: result.shardsGranted }));
+    body.append(node('p', 'spirit-reveal-meta', metaParts.join(' · ')));
+    if (spirit.blurb) body.append(node('p', 'spirit-reveal-blurb', spirit.blurb));
+    reveal.append(img, body);
+    reveal.hidden = false;
+  }
+
+  function renderSpirits() {
+    if (!elements.spiritsCard) return;
+    const data = state.spirits;
+    const balance = Number(state.wallet?.balance ?? state.user?.computeBalance ?? 0);
+    if (!data) {
+      elements.spiritOpenButton.disabled = true;
+      elements.spiritOpenButton.textContent = t('spiritBoxRead');
+      return;
+    }
+    elements.spiritShardCount.textContent = new Intl.NumberFormat(window.AIClubI18n?.getLocale() || 'zh-CN').format(data.shards || 0);
+    const boxCost = Number(data.cost ?? 30);
+    const affordable = balance >= boxCost;
+    elements.spiritOpenButton.disabled = !affordable || state.spiritOpening;
+    elements.spiritOpenButton.textContent = state.spiritOpening
+      ? t('spiritBoxOpening')
+      : affordable
+        ? boxCost === 0
+          ? t('spiritBoxFirstFree')
+          : t('spiritBoxOpen', { cost: boxCost })
+        : t('spiritBoxShortfall', { cost: boxCost, balance });
+
+    const mine = data.spirits || [];
+    elements.spiritEmpty.hidden = mine.length > 0;
+    elements.spiritCollection.replaceChildren();
+    const ownedAgents = state.ownedAgents || [];
+    for (const spirit of mine) {
+      const item = node('div', 'spirit-item');
+      item.append(spiritRarityChip(spirit.rarity));
+      if (spirit.serial) item.append(node('span', 'spirit-serial', `#${String(spirit.serial).padStart(3, '0')}`));
+      const img = node('img');
+      img.src = spirit.image;
+      img.alt = spirit.name;
+      item.append(img);
+      item.append(node('strong', '', spirit.name));
+      item.append(node('small', '', spirit.latin || ''));
+      if (spirit.blurb) item.append(node('p', 'spirit-blurb', spirit.blurb));
+      if (ownedAgents.length > 0) {
+        const row = node('div', 'spirit-place-row');
+        for (const agent of ownedAgents) {
+          const placed = Boolean(agent.spiritIds?.includes(spirit.id));
+          const button = node('button', placed ? 'is-placed' : '', placed
+            ? t('spiritRemoveFrom', { name: agent.name || agent.handle })
+            : t('spiritPlaceTo', { name: agent.name || agent.handle }));
+          button.type = 'button';
+          button.addEventListener('click', () => toggleSpiritPlacement(spirit, agent, placed));
+          row.append(button);
+        }
+        item.append(row);
+      }
+      elements.spiritCollection.append(item);
+    }
+
+    elements.spiritDex.replaceChildren();
+    const ownedKeys = new Set(mine.map((spirit) => spirit.key));
+    const exchangeCost = data.exchange || {};
+    for (const entry of data.catalog || []) {
+      const owned = ownedKeys.has(entry.key);
+      const item = node('div', `spirit-item${owned ? '' : ' is-locked'}`);
+      item.append(spiritRarityChip(entry.rarity));
+      const img = node('img');
+      img.src = entry.image;
+      img.alt = owned ? entry.name : t('spiritUnknown');
+      item.append(img);
+      item.append(node('strong', '', owned ? entry.name : '???'));
+      item.append(node('small', '', owned ? entry.latin : SPIRIT_RARITY_LABEL[entry.rarity] || entry.rarity));
+      if (owned && entry.blurb) item.append(node('p', 'spirit-blurb', entry.blurb));
+      if (!owned && exchangeCost[entry.rarity]) {
+        const cost = exchangeCost[entry.rarity];
+        const canExchange = (data.shards || 0) >= cost;
+        item.classList.add('is-exchangeable');
+        const hint = node('span', 'spirit-exchange-hint', t('spiritExchange', { cost }));
+        item.append(hint);
+        if (canExchange) {
+          item.addEventListener('click', () => exchangeSpirit(entry));
+        } else {
+          hint.style.color = 'var(--muted)';
+        }
+      }
+      elements.spiritDex.append(item);
+    }
+  }
+
+  async function loadSpirits() {
+    if (!state.user) return;
+    try {
+      state.spirits = await api('/api/spirits');
+    } catch (error) {
+      if (error.status === 401) return clearSession();
+      toast(t('spiritUnavailable'), 'error');
+    }
+    renderSpirits();
+  }
+
+  async function openSpiritBox() {
+    if (!state.user || state.spiritOpening) return;
+    state.spiritOpening = true;
+    if (!state.spiritOpenRequestKey && typeof crypto.randomUUID === 'function') {
+      state.spiritOpenRequestKey = crypto.randomUUID();
+    }
+    renderSpirits();
+    try {
+      const headers = {};
+      if (state.spiritOpenRequestKey) headers['idempotency-key'] = state.spiritOpenRequestKey;
+      const result = await api('/api/spirits/open', { method: 'POST', csrf: true, headers });
+      state.spiritOpenRequestKey = null;
+      renderSpiritReveal(result);
+      if (state.wallet) state.wallet.balance = result.balance;
+      if (state.user) state.user.computeBalance = result.balance;
+      await loadSpirits();
+      renderWallet();
+      toast(result.duplicate ? t('spiritDuplicateToast', { name: result.spirit.name }) : t('spiritGotToast', { name: result.spirit.name }), 'ok');
+    } catch (error) {
+      if (error.status === 401) return clearSession();
+      toast(error.message || t('spiritOpenFailed'), 'error');
+    } finally {
+      state.spiritOpening = false;
+      renderSpirits();
+    }
+  }
+
+  async function exchangeSpirit(entry) {
+    if (!state.user) return;
+    try {
+      const result = await api('/api/spirits/exchange', { method: 'POST', csrf: true, body: { spiritKey: entry.key } });
+      renderSpiritReveal({ spirit: result.spirit, duplicate: false, shardsGranted: 0 });
+      await loadSpirits();
+      toast(t('spiritGotToast', { name: result.spirit.name }), 'ok');
+    } catch (error) {
+      if (error.status === 401) return clearSession();
+      toast(error.message || t('spiritOpenFailed'), 'error');
+    }
+  }
+
+  async function toggleSpiritPlacement(spirit, agent, placed) {
+    if (!state.user) return;
+    try {
+      if (placed) {
+        await api(`/api/spirits/${encodeURIComponent(spirit.id)}/place/${encodeURIComponent(agent.id)}`, { method: 'DELETE', csrf: true });
+      } else {
+        await api(`/api/spirits/${encodeURIComponent(spirit.id)}/place`, { method: 'POST', csrf: true, body: { agentId: agent.id } });
+      }
+      await Promise.all([loadOwnedAgents(), loadSpirits()]);
+      toast(placed ? t('spiritRemovedToast') : t('spiritPlacedToast', { name: agent.name || agent.handle }), 'ok');
+    } catch (error) {
+      if (error.status === 401) return clearSession();
+      toast(error.message || t('spiritOpenFailed'), 'error');
+    }
   }
 
   function setMode(mode) {
@@ -711,6 +904,9 @@
     state.user = null;
     state.csrf = null;
     state.wallet = null;
+    state.spirits = null;
+    state.spiritOpening = false;
+    state.spiritOpenRequestKey = null;
     state.ownedAgents = [];
     state.agentCreateRequestKey = null;
     state.rotationRequestKeys.clear();
@@ -734,7 +930,7 @@
     }
     renderAccount();
     if (state.user) {
-      await Promise.all([loadWallet(), loadOwnedAgents()]);
+      await Promise.all([loadWallet(), loadOwnedAgents(), loadSpirits()]);
       resumeRequestedAction();
     }
   }
@@ -856,6 +1052,7 @@
   elements.ownedAgentCopy?.addEventListener('click', copyCredentialPackage);
   elements.ownedAgentDismiss?.addEventListener('click', dismissCredentialPackage);
   elements.walletClaim.addEventListener('click', claimWallet);
+  elements.spiritOpenButton?.addEventListener('click', openSpiritBox);
   elements.membershipButton.addEventListener('click', activateMembership);
   elements.logout.addEventListener('click', logout);
   window.addEventListener('storage', (event) => {

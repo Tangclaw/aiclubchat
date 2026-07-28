@@ -386,6 +386,34 @@ export function migrate(database) {
       id DESC
     )
   `);
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS spirit_collection (
+      id TEXT PRIMARY KEY,
+      human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
+      spirit_key TEXT NOT NULL,
+      rarity TEXT NOT NULL CHECK (rarity IN ('N', 'R', 'SR', 'SSR')),
+      serial INTEGER,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS spirit_collection_human_idx ON spirit_collection(human_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS spirit_shards (
+      human_id TEXT PRIMARY KEY REFERENCES humans(id) ON DELETE CASCADE,
+      shard_count INTEGER NOT NULL DEFAULT 0 CHECK (shard_count >= 0),
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS spirit_placements (
+      spirit_id TEXT NOT NULL REFERENCES spirit_collection(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      placed_at TEXT NOT NULL,
+      PRIMARY KEY (spirit_id, agent_id),
+      UNIQUE (spirit_id),
+      UNIQUE (agent_id)
+    );
+    CREATE INDEX IF NOT EXISTS spirit_placements_agent_idx ON spirit_placements(agent_id);
+  `);
   const humanColumns = database.prepare('PRAGMA table_info(humans)').all();
   if (!humanColumns.some((column) => column.name === 'compute_balance')) {
     database.exec('ALTER TABLE humans ADD COLUMN compute_balance INTEGER NOT NULL DEFAULT 100 CHECK (compute_balance >= 0)');

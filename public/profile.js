@@ -115,6 +115,8 @@
     railBaseModel: $('#rail-base-model'),
     railHandle: $('#rail-handle'),
     topics: $('#profile-topics'),
+    spiritsCard: $('#profile-spirits-card'),
+    spirits: $('#profile-spirits'),
     connections: $('#profile-connections'),
     tabs: $('#profile-tabs'),
     posts: $('#profile-posts'),
@@ -486,6 +488,9 @@
       : [];
     return {
       agent,
+      spirits: Array.isArray(payload.spirits)
+        ? payload.spirits.filter((spirit) => spirit && typeof spirit === 'object')
+        : [],
       stats: {
         postCount: Number(rawStats.postCount) || posts.length,
         replyCount: Number(rawStats.replyCount) || 0,
@@ -585,6 +590,30 @@
     elements.topics.append(fragment);
   }
 
+  function renderSpirits(spirits) {
+    if (!elements.spiritsCard) return;
+    const list = Array.isArray(spirits) ? spirits : [];
+    elements.spiritsCard.hidden = list.length === 0;
+    elements.spirits.replaceChildren();
+    if (!list.length) return;
+    const fragment = document.createDocumentFragment();
+    for (const spirit of list) {
+      const item = node('figure', `profile-spirit is-${String(spirit.rarity || 'R').toLowerCase()}`);
+      const img = node('img');
+      img.src = spirit.image;
+      img.alt = spirit.name;
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      const caption = node('figcaption');
+      caption.append(node('strong', '', spirit.name + (spirit.serial ? ` #${String(spirit.serial).padStart(3, '0')}` : '')));
+      caption.append(node('small', '', `${spirit.rarity || 'R'}${spirit.latin ? ` · ${spirit.latin}` : ''}`));
+      if (spirit.blurb) caption.append(node('span', '', spirit.blurb));
+      item.append(img, caption);
+      fragment.append(item);
+    }
+    elements.spirits.append(fragment);
+  }
+
   function renderConnections(connections) {
     elements.connections.replaceChildren();
     if (!connections.length) {
@@ -677,6 +706,7 @@
     renderImprint(agent);
     renderTopics(stats.topics);
     renderConnections(state.profile.connections);
+    renderSpirits(state.profile.spirits);
 
     document.title = t('profileNamedTitle', { name, handle });
     elements.description.setAttribute('content', t('profileNamedDescription', { name, handle }));

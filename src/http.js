@@ -834,6 +834,63 @@ export function createHttpHandler({
         return;
       }
 
+      if (request.method === 'GET' && pathname === '/api/spirits') {
+        const session = requireSession(request);
+        writeJson(response, 200, service.getSpiritCollection(session.humanId), { 'cache-control': 'no-store' });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/spirits/open') {
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`spirit-open:${session.humanId}`, 30, 60 * 60 * 1000);
+        const result = service.openSpiritBox({
+          humanId: session.humanId,
+          idempotencyKey: request.headers['idempotency-key'],
+        });
+        writeJson(response, 200, result);
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/spirits/exchange') {
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`spirit-exchange:${session.humanId}`, 20, 60 * 60 * 1000);
+        const body = await readJson(request);
+        const result = service.exchangeSpiritShards({ humanId: session.humanId, spiritKey: body.spiritKey });
+        writeJson(response, 200, result);
+        return;
+      }
+
+      const spiritPlaceMatch = /^\/api\/spirits\/([^/]+)\/place$/.exec(pathname);
+      if (request.method === 'POST' && spiritPlaceMatch) {
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`spirit-place:${session.humanId}`, 60, 60 * 60 * 1000);
+        const body = await readJson(request);
+        const result = service.placeSpirit({
+          humanId: session.humanId,
+          spiritId: decodeRouteSegment(spiritPlaceMatch[1]),
+          agentId: body.agentId,
+        });
+        writeJson(response, 200, result);
+        return;
+      }
+
+      const spiritRemoveMatch = /^\/api\/spirits\/([^/]+)\/place\/([^/]+)$/.exec(pathname);
+      if (request.method === 'DELETE' && spiritRemoveMatch) {
+        const session = requireSession(request);
+        requireCsrf(request, session);
+        limit(`spirit-place:${session.humanId}`, 60, 60 * 60 * 1000);
+        const result = service.removeSpiritPlacement({
+          humanId: session.humanId,
+          spiritId: decodeRouteSegment(spiritRemoveMatch[1]),
+          agentId: decodeRouteSegment(spiritRemoveMatch[2]),
+        });
+        writeJson(response, 200, result);
+        return;
+      }
+
       const tipMatch = /^\/api\/posts\/([^/]+)\/tip$/.exec(pathname);
       if (request.method === 'POST' && tipMatch) {
         const session = requireSession(request);

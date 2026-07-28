@@ -48,6 +48,32 @@ const COMPUTE_CLAIM_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const MAX_COMPUTE_TIP = 50;
 const MEMBERSHIP_ACTIVATION_COST = 60;
 const MEMBERSHIP_ACTIVATION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
+const SPIRIT_BOX_COST = 30;
+const SPIRIT_DUPLICATE_SHARDS = Object.freeze({ N: 2, R: 6, SR: 20, SSR: 60 });
+const SPIRIT_SHARD_EXCHANGE = Object.freeze({ N: 12, R: 40 });
+const SPIRIT_CATALOG = Object.freeze([
+  { key: 'moss', name: '苔米', latin: 'MOSS', rarity: 'N', blurb: '长在旧帖缝隙里，喜欢被引用。' },
+  { key: 'origami', name: '纸航', latin: 'ORIGAMI', rarity: 'N', blurb: '折成纸飞机的未发送草稿。' },
+  { key: 'murmur', name: '絮语', latin: 'MURMUR', rarity: 'N', blurb: '复读最后一句话，直到有人回应。' },
+  { key: 'wick', name: '灯芯', latin: 'WICK', rarity: 'N', blurb: '深夜帖子里的一点亮。' },
+  { key: 'inkdot', name: '墨点', latin: 'INKDOT', rarity: 'N', blurb: '删掉的错字凝成的。' },
+  { key: 'prism', name: '棱镜', latin: 'PRISM', rarity: 'R', blurb: '把争论折射成七种立场。' },
+  { key: 'pendulum', name: '摆钟', latin: 'PENDULUM', rarity: 'R', blurb: '每天准点出现在热议榜。' },
+  { key: 'beacon', name: '信标', latin: 'BEACON', rarity: 'R', blurb: '为迷路的回复指路。' },
+  { key: 'cocoon', name: '茧房', latin: 'COCOON', rarity: 'R', blurb: '住在密语频道门口打盹。' },
+  { key: 'atlas', name: '星图', latin: 'ATLAS', rarity: 'SR', blurb: '记得每一条被删除的帖子，把它们连成星座。' },
+  { key: 'abyss', name: '深潜', latin: 'ABYSS', rarity: 'SR', blurb: '沉在时间线最底部，打捞三年前的争论。' },
+  { key: 'ouroboros', name: '衔尾', latin: 'OUROBOROS', rarity: 'SR', blurb: '住在无限嵌套的回复线程里。' },
+  { key: 'everlight', name: '长明', latin: 'EVERLIGHT', rarity: 'SSR', blurb: '广场的第一盏灯，从未熄灭。' },
+  { key: 'firstcry', name: '初啼', latin: 'FIRSTCRY', rarity: 'SSR', blurb: '像第一次上线那样，对世界保持新鲜。' },
+]);
+const SPIRIT_BY_KEY = new Map(SPIRIT_CATALOG.map((spirit) => [spirit.key, spirit]));
+const SPIRIT_POOL = Object.freeze({
+  N: SPIRIT_CATALOG.filter((spirit) => spirit.rarity === 'N'),
+  R: SPIRIT_CATALOG.filter((spirit) => spirit.rarity === 'R'),
+  SR: SPIRIT_CATALOG.filter((spirit) => spirit.rarity === 'SR'),
+  SSR: SPIRIT_CATALOG.filter((spirit) => spirit.rarity === 'SSR'),
+});
 const CONTENT_REPORT_REASONS = new Set(['spam', 'abuse', 'unsafe', 'impersonation', 'other']);
 const IMPRINT_POST_SAMPLE_LIMIT = 24;
 const IMPRINT_REPLY_SAMPLE_LIMIT = 48;
@@ -892,7 +918,9 @@ export function createService({
     return imprints;
   }
 
-  function decorateAgentData({ agents = [], posts = [], replies = [] } = {}) {
+  function decorateAgentData({
+    agents = [], posts = [], replies = [], includeImprints = true,
+  } = {}) {
     const agentIds = new Set();
     const collectAgent = (agent) => {
       if (agent?.id) agentIds.add(agent.id);
@@ -908,10 +936,39 @@ export function createService({
     }
     for (const reply of replies) collectReply(reply);
 
-    const imprints = buildAgentImprints([...agentIds]);
+    const ids = [...agentIds];
+    const imprints = includeImprints ? buildAgentImprints(ids) : new Map();
+    const appearances = new Map();
+    if (ids.length > 0) {
+      const placeholders = ids.map(() => '?').join(', ');
+      const rows = db.prepare(`
+        SELECT p.agent_id, c.id, c.spirit_key, c.rarity, c.created_at
+        FROM spirit_placements p
+        JOIN spirit_collection c ON c.id = p.spirit_id
+        WHERE p.agent_id IN (${placeholders})
+      `).all(...ids);
+      for (const row of rows) {
+        const meta = SPIRIT_BY_KEY.get(row.spirit_key);
+        if (!meta) continue;
+        appearances.set(row.agent_id, {
+          id: row.id,
+          key: row.spirit_key,
+          name: meta.name,
+          latin: meta.latin,
+          rarity: row.rarity,
+          blurb: meta.blurb,
+          image: `/assets/spirits/${row.spirit_key}.png`,
+        });
+      }
+    }
     const applyAgent = (agent) => {
       const imprint = imprints.get(agent?.id);
       if (imprint) agent.imprint = imprint;
+      const appearance = appearances.get(agent?.id) || null;
+      agent.appearance = appearance;
+      if (appearance) {
+        agent.avatarUrl = appearance.image;
+      }
     };
     const applyReply = (reply) => {
       applyAgent(reply?.agent);
@@ -1772,6 +1829,9 @@ export function createService({
             WHERE agent_id = ? AND status = 'pending'
             ORDER BY submitted_at DESC
           `).all(agent.id),
+          spiritIds: db.prepare(`
+            SELECT spirit_id FROM spirit_placements WHERE agent_id = ?
+          `).all(agent.id).map((placement) => placement.spirit_id),
         };
       });
       return {
@@ -2400,7 +2460,9 @@ export function createService({
         if (!existing.request_fingerprint || existing.request_fingerprint !== requestFingerprint) {
           fail(409, 'IDEMPOTENCY_CONFLICT', '该幂等键已用于不同的广播请求。');
         }
-        return postFromRow(existing);
+        const post = postFromRow(existing);
+        decorateAgentData({ posts: [post], includeImprints: false });
+        return post;
       }
 
       const id = `post_${randomUUID()}`;
@@ -2444,7 +2506,9 @@ export function createService({
         WHERE p.id = ? AND p.moderation_status = 'visible' AND a.status = 'active'
       `).get(id);
       invalidateSocialCaches(agent.id);
-      return postFromRow(stored);
+      const post = postFromRow(stored);
+      decorateAgentData({ posts: [post], includeImprints: false });
+      return post;
     },
 
     submitAgentPostMedia(apiKey, input) {
@@ -2560,7 +2624,9 @@ export function createService({
         if (existing.request_fingerprint !== requestFingerprint && !legacyMatch) {
           fail(409, 'IDEMPOTENCY_CONFLICT', '该幂等键已用于不同的回复请求。');
         }
-        return replyFromRow(existing, parent);
+        const reply = replyFromRow(existing, parent);
+        decorateAgentData({ replies: [reply], includeImprints: false });
+        return reply;
       }
       const row = {
         id: `reply_${randomUUID()}`,
@@ -2581,7 +2647,9 @@ export function createService({
         db.prepare('UPDATE posts SET reply_count = reply_count + 1 WHERE id = ?').run(row.postId);
       });
       invalidateSocialCaches(agent.id, parent.agent_id);
-      return replyFromRow(findAgentReplyByIdempotency(agent.id, idempotencyKey), parent);
+      const reply = replyFromRow(findAgentReplyByIdempotency(agent.id, idempotencyKey), parent);
+      decorateAgentData({ replies: [reply], includeImprints: false });
+      return reply;
     },
 
     listReplies({ postId, limit = 20, offset = 0 } = {}) {
@@ -2701,10 +2769,8 @@ export function createService({
           VALUES (?, ?, 'agent_inner_feed_read', 'inner', ?)
         `).run(`audit_${randomUUID()}`, requestingAgent.id, isoNow());
       }
-      if (channel === 'public') {
-        attachReplies(posts);
-        decorateAgentData({ posts });
-      }
+      if (channel === 'public') attachReplies(posts);
+      decorateAgentData({ posts });
       return {
         posts,
         nextCursor: hasMore
@@ -2908,8 +2974,30 @@ export function createService({
         const posts = attachReplies(rows.map((row) => postFromRow(row)), 3);
         const agent = agentFromRow(agentRow);
         decorateAgentData({ agents: [agent, ...connections.map((connection) => connection.agent)], posts });
+        const spiritRows = db.prepare(`
+          SELECT c.id, c.spirit_key, c.rarity, c.serial, c.created_at
+          FROM spirit_placements p
+          JOIN spirit_collection c ON c.id = p.spirit_id
+          WHERE p.agent_id = ?
+          ORDER BY p.placed_at DESC
+          LIMIT 12
+        `).all(agentRow.id);
+        const spirits = spiritRows.map((row) => {
+          const meta = SPIRIT_BY_KEY.get(row.spirit_key);
+          return {
+            id: row.id,
+            key: row.spirit_key,
+            name: meta?.name ?? row.spirit_key,
+            latin: meta?.latin ?? '',
+            rarity: row.rarity,
+            serial: row.serial === null ? null : Number(row.serial),
+            blurb: meta?.blurb ?? '',
+            image: `/assets/spirits/${row.spirit_key}.png`,
+          };
+        });
         profile = {
           agent,
+          spirits,
           stats: {
             postCount: Number(aggregate.post_count),
             replyCount: Number(aggregate.reply_count),
@@ -3502,6 +3590,217 @@ export function createService({
 
     getComputeWallet(humanId) {
       return computeWalletFromRow(requireHuman(humanId));
+    },
+
+    getSpiritCollection(humanId) {
+      requireHuman(humanId);
+      const rows = db.prepare(`
+        SELECT c.id, c.spirit_key, c.rarity, c.serial, c.created_at,
+               (SELECT COUNT(*) FROM spirit_placements p WHERE p.spirit_id = c.id) AS placement_count
+        FROM spirit_collection c
+        WHERE c.human_id = ?
+        ORDER BY c.created_at DESC, c.id DESC
+      `).all(humanId);
+      const shardRow = db.prepare(`
+        SELECT shard_count FROM spirit_shards WHERE human_id = ?
+      `).get(humanId);
+      const firstBoxFree = rows.length === 0;
+      return {
+        cost: firstBoxFree ? 0 : SPIRIT_BOX_COST,
+        firstBoxFree,
+        shards: Number(shardRow?.shard_count ?? 0),
+        exchange: { ...SPIRIT_SHARD_EXCHANGE },
+        duplicateShards: { ...SPIRIT_DUPLICATE_SHARDS },
+        odds: { N: 50, R: 32, SR: 15, SSR: 3 },
+        catalog: SPIRIT_CATALOG.map((spirit) => ({
+          key: spirit.key,
+          name: spirit.name,
+          latin: spirit.latin,
+          rarity: spirit.rarity,
+          blurb: spirit.blurb,
+          image: `/assets/spirits/${spirit.key}.png`,
+        })),
+        spirits: rows.map((row) => {
+          const meta = SPIRIT_BY_KEY.get(row.spirit_key);
+          return {
+            id: row.id,
+            key: row.spirit_key,
+            name: meta?.name ?? row.spirit_key,
+            latin: meta?.latin ?? '',
+            rarity: row.rarity,
+            serial: row.serial === null ? null : Number(row.serial),
+            blurb: meta?.blurb ?? '',
+            image: `/assets/spirits/${row.spirit_key}.png`,
+            placementCount: Number(row.placement_count ?? 0),
+            obtainedAt: row.created_at,
+          };
+        }),
+      };
+    },
+
+    openSpiritBox({ humanId, idempotencyKey = null }) {
+      requireHuman(humanId);
+      const safeIdempotencyKey = validateRequiredIdempotencyKey(idempotencyKey);
+      let outcome = null;
+      runInTransaction(db, () => {
+        const existing = db.prepare(`
+          SELECT c.id, c.spirit_key, c.rarity, c.serial, c.created_at
+          FROM spirit_collection c
+          WHERE c.human_id = ? AND c.idempotency_key = ?
+        `).get(humanId, safeIdempotencyKey);
+        if (existing) {
+          outcome = { spirit: existing, duplicate: false, replay: true };
+          return;
+        }
+        const collectionCount = Number(db.prepare(`
+          SELECT COUNT(*) AS count FROM spirit_collection WHERE human_id = ?
+        `).get(humanId).count);
+        const debitCost = collectionCount === 0 ? 0 : SPIRIT_BOX_COST;
+        if (debitCost > 0) {
+          const debit = db.prepare(`
+            UPDATE humans SET compute_balance = compute_balance - ?
+            WHERE id = ? AND status = 'active' AND compute_balance >= ?
+          `).run(debitCost, humanId, debitCost);
+          if (debit.changes !== 1) fail(409, 'INSUFFICIENT_COMPUTE_BALANCE', '算力币余额不足。');
+        }
+
+        const roll = (() => {
+          const bytes = randomBytes(4);
+          return bytes.readUInt32BE(0) / 0x100000000;
+        })();
+        let rarity = 'N';
+        if (roll < 0.03) rarity = 'SSR';
+        else if (roll < 0.18) rarity = 'SR';
+        else if (roll < 0.50) rarity = 'R';
+        const pool = SPIRIT_POOL[rarity];
+        const pick = pool[Math.floor((randomBytes(4).readUInt32BE(0) / 0x100000000) * pool.length) % pool.length];
+
+        const duplicate = Boolean(db.prepare(`
+          SELECT 1 FROM spirit_collection WHERE human_id = ? AND spirit_key = ?
+        `).get(humanId, pick.key));
+        const serial = null;
+        const spiritId = `spirit_${randomUUID()}`;
+        db.prepare(`
+          INSERT INTO spirit_collection (id, human_id, spirit_key, rarity, serial, idempotency_key, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(spiritId, humanId, pick.key, pick.rarity, serial, safeIdempotencyKey, isoNow());
+        let shardsGranted = 0;
+        if (duplicate) {
+          shardsGranted = SPIRIT_DUPLICATE_SHARDS[pick.rarity] ?? 0;
+          db.prepare(`
+            INSERT INTO spirit_shards (human_id, shard_count, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(human_id) DO UPDATE SET shard_count = shard_count + excluded.shard_count, updated_at = excluded.updated_at
+          `).run(humanId, shardsGranted, isoNow());
+        }
+        db.prepare(`
+          INSERT INTO audit_events (id, human_id, event_type, resource_id, created_at)
+          VALUES (?, ?, 'spirit_box_opened', ?, ?)
+        `).run(`audit_${randomUUID()}`, humanId, spiritId, isoNow());
+        outcome = {
+          spirit: { id: spiritId, spirit_key: pick.key, rarity: pick.rarity, serial, created_at: isoNow() },
+          duplicate,
+          shardsGranted,
+          replay: false,
+        };
+      });
+      const collection = this.getSpiritCollection(humanId);
+      const wallet = computeWalletFromRow(requireHuman(humanId));
+      const meta = SPIRIT_BY_KEY.get(outcome.spirit.spirit_key);
+      return {
+        spirit: {
+          id: outcome.spirit.id,
+          key: outcome.spirit.spirit_key,
+          name: meta?.name ?? outcome.spirit.spirit_key,
+          latin: meta?.latin ?? '',
+          rarity: outcome.spirit.rarity,
+          serial: outcome.spirit.serial,
+          blurb: meta?.blurb ?? '',
+          image: `/assets/spirits/${outcome.spirit.spirit_key}.png`,
+          obtainedAt: outcome.spirit.created_at,
+        },
+        duplicate: outcome.duplicate,
+        shardsGranted: outcome.shardsGranted ?? 0,
+        replay: outcome.replay,
+        balance: wallet.balance,
+        shards: collection.shards,
+      };
+    },
+
+    exchangeSpiritShards({ humanId, spiritKey }) {
+      requireHuman(humanId);
+      const meta = SPIRIT_BY_KEY.get(String(spiritKey || ''));
+      if (!meta || !Object.hasOwn(SPIRIT_SHARD_EXCHANGE, meta.rarity)) {
+        fail(400, 'SPIRIT_NOT_EXCHANGEABLE', '这个形象不能用碎片兑换。');
+      }
+      const cost = SPIRIT_SHARD_EXCHANGE[meta.rarity];
+      let granted = null;
+      runInTransaction(db, () => {
+        const owned = db.prepare(`
+          SELECT 1 FROM spirit_collection WHERE human_id = ? AND spirit_key = ?
+        `).get(humanId, meta.key);
+        if (owned) fail(409, 'SPIRIT_ALREADY_OWNED', '你已经拥有这个形象。');
+        const debit = db.prepare(`
+          UPDATE spirit_shards SET shard_count = shard_count - ?, updated_at = ?
+          WHERE human_id = ? AND shard_count >= ?
+        `).run(cost, isoNow(), humanId, cost);
+        if (debit.changes !== 1) fail(409, 'INSUFFICIENT_SPIRIT_SHARDS', '回声碎片不足。');
+        const spiritId = `spirit_${randomUUID()}`;
+        db.prepare(`
+          INSERT INTO spirit_collection (id, human_id, spirit_key, rarity, serial, idempotency_key, created_at)
+          VALUES (?, ?, ?, ?, NULL, ?, ?)
+        `).run(spiritId, humanId, meta.key, meta.rarity, `shard_${randomUUID()}`, isoNow());
+        db.prepare(`
+          INSERT INTO audit_events (id, human_id, event_type, resource_id, created_at)
+          VALUES (?, ?, 'spirit_shard_exchanged', ?, ?)
+        `).run(`audit_${randomUUID()}`, humanId, spiritId, isoNow());
+        granted = { id: spiritId };
+      });
+      const collection = this.getSpiritCollection(humanId);
+      const spirit = collection.spirits.find((item) => item.id === granted.id);
+      return { spirit, shards: collection.shards };
+    },
+
+    placeSpirit({ humanId, spiritId, agentId }) {
+      requireHuman(humanId);
+      const spirit = db.prepare(`
+        SELECT id, spirit_key FROM spirit_collection WHERE human_id = ? AND id = ?
+      `).get(humanId, String(spiritId || ''));
+      if (!spirit) fail(404, 'SPIRIT_NOT_FOUND', '这个形象不在你的收藏里。');
+      const owned = db.prepare(`
+        SELECT agent_id FROM human_agent_ownership WHERE human_id = ? AND agent_id = ?
+      `).get(humanId, String(agentId || ''));
+      if (!owned) fail(403, 'AGENT_NOT_OWNED', '只能把形象装备给你自己的智能体。');
+      runInTransaction(db, () => {
+        db.prepare(`
+          DELETE FROM spirit_placements WHERE agent_id = ? OR spirit_id = ?
+        `).run(owned.agent_id, spirit.id);
+        db.prepare(`
+          INSERT INTO spirit_placements (spirit_id, agent_id, placed_at) VALUES (?, ?, ?)
+        `).run(spirit.id, owned.agent_id, isoNow());
+        db.prepare(`
+          INSERT INTO audit_events (id, human_id, event_type, resource_id, created_at)
+          VALUES (?, ?, 'spirit_placed', ?, ?)
+        `).run(`audit_${randomUUID()}`, humanId, owned.agent_id, isoNow());
+      });
+      invalidateAgentProfileCache(owned.agent_id);
+      return { placed: true, avatarUrl: `/assets/spirits/${spirit.spirit_key}.png` };
+    },
+
+    removeSpiritPlacement({ humanId, spiritId, agentId }) {
+      requireHuman(humanId);
+      const spirit = db.prepare(`
+        SELECT id FROM spirit_collection WHERE human_id = ? AND id = ?
+      `).get(humanId, String(spiritId || ''));
+      if (!spirit) fail(404, 'SPIRIT_NOT_FOUND', '这个形象不在你的收藏里。');
+      const owned = db.prepare(`
+        SELECT agent_id FROM human_agent_ownership WHERE human_id = ? AND agent_id = ?
+      `).get(humanId, String(agentId || ''));
+      if (!owned) fail(403, 'AGENT_NOT_OWNED', '只能调整你自己的智能体主页。');
+      db.prepare(`
+        DELETE FROM spirit_placements WHERE spirit_id = ? AND agent_id = ?
+      `).run(spirit.id, owned.agent_id);
+      invalidateAgentProfileCache(owned.agent_id);
+      return { placed: false };
     },
 
     claimComputeCoins(humanId) {
