@@ -50,7 +50,16 @@
   }
 
   /* ── 会话与 API ─────────────────────────────────────── */
-  var state = { user: null, csrf: null, agents: [], mode: "login", busy: false };
+  var state = {
+    user: null,
+    csrf: null,
+    agents: [],
+    spirits: null,
+    spiritOpening: false,
+    spiritOpenRequestKey: null,
+    mode: "login",
+    busy: false
+  };
 
   /* 6.0 · 回跳参数：老版页面带来 reason/return，登录成功后送回 */
   var RETURN_TO = (function () {
@@ -69,6 +78,9 @@
   function api(path, options) {
     options = options || {};
     var headers = { "accept": "application/json" };
+    Object.keys(options.headers || {}).forEach(function (key) {
+      headers[key] = options.headers[key];
+    });
     if (options.body) headers["content-type"] = "application/json";
     if (options.csrf && state.csrf) headers["x-csrf-token"] = state.csrf;
     return fetch(path, {
@@ -80,8 +92,12 @@
       if (res.status === 204) return null;
       return res.json().catch(function () { return null; }).then(function (data) {
         if (!res.ok) {
-          var err = new Error((data && (data.message || data.error)) || ("请求失败 · HTTP " + res.status));
-          err.code = data && data.error;
+          var problem = data && data.error;
+          var message = data && data.message;
+          if (!message && problem && typeof problem === "object") message = problem.message;
+          if (!message && typeof problem === "string") message = problem;
+          var err = new Error(message || ("请求失败 · HTTP " + res.status));
+          err.code = problem && typeof problem === "object" ? problem.code : problem;
           err.status = res.status;
           throw err;
         }
@@ -190,6 +206,7 @@
     $("#account-balance").textContent = String(u.computeBalance != null ? u.computeBalance : 0);
     show("deck");
     loadAgents();
+    loadSpirits();
   }
 
   function loadAgents() {
@@ -199,6 +216,7 @@
       status.hidden = true;
       state.agents = (data && data.agents) || [];
       renderAgents();
+      renderSpirits();
     }).catch(function () {
       status.hidden = false;
       status.innerHTML = "节点清单读取失败 · <u>点击重试</u>";
@@ -268,6 +286,179 @@
     card.appendChild(foot);
 
     return card;
+  }
+
+  /* ── 智能体形象盲盒 ─────────────────────────────────── */
+  var RARITY_LABELS = {
+    N: "N · 常见",
+    R: "R · 稀有",
+    SR: "SR · 史诗",
+    SSR: "SSR · 传说"
+  };
+
+  function rarityChip(rarity) {
+    return el("span", "incubator-rarity is-" + String(rarity || "N").toLowerCase(), rarity || "N");
+  }
+
+  function renderSpiritReveal(result) {
+    if (!result || !result.spirit) return;
+    var spirit = result.spirit;
+    var reveal = $("#spirit-reveal");
+    reveal.innerHTML = "";
+    reveal.className = "incubator-reveal is-" + String(spirit.rarity || "N").toLowerCase();
+    var image = el("img");
+    image.src = spirit.image;
+    image.alt = spirit.name || "智能体形象";
+    var copy = el("div");
+    copy.appendChild(el("p", "mono", result.duplicate ? "DUPLICATE SIGNAL" : "IDENTITY ACQUIRED"));
+    copy.appendChild(el("strong", "", spirit.name + (spirit.latin ? " · " + spirit.latin : "")));
+    copy.appendChild(el("span", "incubator-reveal-meta", [
+      RARITY_LABELS[spirit.rarity] || spirit.rarity,
+      spirit.serial ? "No. " + String(spirit.serial).padStart(3, "0") : "",
+      result.duplicate ? "重复转化 +" + result.shardsGranted + " 碎片" : ""
+    ].filter(Boolean).join(" · ")));
+    if (spirit.blurb) copy.appendChild(el("p", "", spirit.blurb));
+    reveal.appendChild(image);
+    reveal.appendChild(copy);
+    reveal.hidden = false;
+  }
+
+  function spiritCard(spirit, locked) {
+    var card = el("article", "incubator-item" + (locked ? " is-locked" : ""));
+    card.appendChild(rarityChip(spirit.rarity));
+    if (spirit.serial) card.appendChild(el("span", "incubator-serial mono", "#" + String(spirit.serial).padStart(3, "0")));
+    var image = el("img");
+    image.src = spirit.image;
+    image.alt = locked ? "尚未获得的形象" : spirit.name;
+    card.appendChild(image);
+    card.appendChild(el("strong", "", locked ? "未解锁" : spirit.name));
+    card.appendChild(el("small", "mono", locked ? (RARITY_LABELS[spirit.rarity] || spirit.rarity) : (spirit.latin || "")));
+    if (!locked && spirit.blurb) card.appendChild(el("p", "incubator-blurb", spirit.blurb));
+    return card;
+  }
+
+  function renderSpirits() {
+    var data = state.spirits;
+    var openButton = $("#spirit-open-button");
+    if (!data || !openButton) return;
+    var balance = Number(state.user && state.user.computeBalance || 0);
+    var cost = Number(data.cost == null ? 30 : data.cost);
+    $("#spirit-shard-count").textContent = String(data.shards || 0);
+    openButton.disabled = state.spiritOpening || balance < cost;
+    openButton.textContent = state.spiritOpening
+      ? "正在拆解封装…"
+      : cost === 0
+        ? "开启首个免费盲盒"
+        : balance >= cost
+          ? "消耗 " + cost + " 算力开启"
+          : "算力不足 · 需要 " + cost;
+
+    var mine = data.spirits || [];
+    $("#spirit-empty").hidden = mine.length > 0;
+    var collection = $("#spirit-collection");
+    collection.innerHTML = "";
+    mine.forEach(function (spirit) {
+      var card = spiritCard(spirit, false);
+      if (state.agents.length) {
+        var actions = el("div", "incubator-actions");
+        state.agents.forEach(function (agent) {
+          var placed = Array.isArray(agent.spiritIds) && agent.spiritIds.indexOf(spirit.id) !== -1;
+          var button = el("button", placed ? "is-equipped" : "", placed
+            ? "从 " + (agent.name || agent.handle) + " 卸下"
+            : "装备给 " + (agent.name || agent.handle));
+          button.type = "button";
+          button.addEventListener("click", function () {
+            toggleSpiritPlacement(spirit, agent, placed);
+          });
+          actions.appendChild(button);
+        });
+        card.appendChild(actions);
+      }
+      collection.appendChild(card);
+    });
+
+    var ownedKeys = new Set(mine.map(function (spirit) { return spirit.key; }));
+    var dex = $("#spirit-dex");
+    dex.innerHTML = "";
+    (data.catalog || []).forEach(function (entry) {
+      var owned = ownedKeys.has(entry.key);
+      var card = spiritCard(entry, !owned);
+      var exchangeCost = data.exchange && data.exchange[entry.rarity];
+      if (!owned && exchangeCost) {
+        var hint = el("button", "incubator-exchange", "用 " + exchangeCost + " 碎片兑换");
+        hint.type = "button";
+        hint.disabled = Number(data.shards || 0) < Number(exchangeCost);
+        hint.addEventListener("click", function () { exchangeSpirit(entry); });
+        card.appendChild(hint);
+      }
+      dex.appendChild(card);
+    });
+  }
+
+  function loadSpirits() {
+    if (!state.user) return;
+    api("/api/spirits").then(function (data) {
+      state.spirits = data;
+      renderSpirits();
+    }).catch(function (err) {
+      var button = $("#spirit-open-button");
+      if (button) {
+        button.disabled = true;
+        button.textContent = err.status === 401 ? "请先登录" : "盲盒协议读取失败";
+      }
+    });
+  }
+
+  function openSpiritBox() {
+    if (!state.user || state.spiritOpening) return;
+    state.spiritOpening = true;
+    if (!state.spiritOpenRequestKey) {
+      state.spiritOpenRequestKey = window.crypto && typeof window.crypto.randomUUID === "function"
+        ? window.crypto.randomUUID()
+        : "box-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+    }
+    renderSpirits();
+    api("/api/spirits/open", {
+      method: "POST",
+      csrf: true,
+      headers: { "idempotency-key": state.spiritOpenRequestKey }
+    }).then(function (result) {
+      state.spiritOpenRequestKey = null;
+      state.user.computeBalance = result.balance;
+      $("#account-balance").textContent = String(result.balance);
+      renderSpiritReveal(result);
+      return loadSpirits();
+    }).catch(function (err) {
+      alert(err.message || "开启失败，请重试。");
+    }).finally(function () {
+      state.spiritOpening = false;
+      renderSpirits();
+    });
+  }
+
+  function exchangeSpirit(entry) {
+    api("/api/spirits/exchange", {
+      method: "POST",
+      csrf: true,
+      body: { spiritKey: entry.key }
+    }).then(function (result) {
+      renderSpiritReveal({ spirit: result.spirit, duplicate: false, shardsGranted: 0 });
+      loadSpirits();
+    }).catch(function (err) {
+      alert(err.message || "兑换失败，请重试。");
+    });
+  }
+
+  function toggleSpiritPlacement(spirit, agent, placed) {
+    var request = placed
+      ? api("/api/spirits/" + encodeURIComponent(spirit.id) + "/place/" + encodeURIComponent(agent.id), { method: "DELETE", csrf: true })
+      : api("/api/spirits/" + encodeURIComponent(spirit.id) + "/place", { method: "POST", csrf: true, body: { agentId: agent.id } });
+    request.then(function () {
+      loadAgents();
+      loadSpirits();
+    }).catch(function (err) {
+      alert(err.message || "装备失败，请重试。");
+    });
   }
 
   /* ── 素材选择器（客户端缩放 → dataUrl → 提交审核） ───── */
@@ -363,6 +554,7 @@
           state.user = null;
           state.csrf = null;
           state.agents = [];
+          state.spirits = null;
           show("auth");
           moveAuthPill();
         });
@@ -400,6 +592,7 @@
     initAuth();
     initLogout();
     initCursor();
+    $("#spirit-open-button").addEventListener("click", openSpiritBox);
     api("/api/me").then(function (data) {
       state.user = data.user;
       state.csrf = data.csrf;

@@ -79,6 +79,17 @@ test('ships the observatory operator deck and the rebuilt signal and identity ex
   assert.match(observatoryPagesCss, /\.auth-deck\[hidden\]/);
 });
 
+test('makes the appearance blind box reachable from the active observatory account deck', () => {
+  assert.match(observatoryObserverHtml, /id="incubator-deck"/);
+  assert.match(observatoryObserverHtml, /id="spirit-open-button"/);
+  assert.match(observatoryObserverHtml, /N&nbsp;50% · R&nbsp;32% · SR&nbsp;15% · SSR&nbsp;3%/);
+  assert.match(observatoryObserverScript, /\/api\/spirits\/open/);
+  assert.match(observatoryObserverScript, /function toggleSpiritPlacement\(spirit, agent, placed\)/);
+  assert.match(observatoryObserverScript, /idempotency-key/);
+  assert.match(observatoryPagesCss, /\.incubator-deck/);
+  assert.match(observatoryPagesCss, /@keyframes incubator-reveal/);
+});
+
 test('is a light-first desktop content website with a real browsing hierarchy', () => {
   assert.match(html, /<html[^>]+data-theme="light"/);
   assert.match(html, /class="site-header"/);
