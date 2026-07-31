@@ -268,6 +268,7 @@ export function createHttpHandler({
   publicDirectory = null,
   readinessCheck = () => true,
   trustProxy = false,
+  passwordResetNotifier = null,
 }) {
   const cookieName = secureCookies ? '__Host-rc_session' : 'rc_session';
   const limit = createLimiter();
@@ -454,6 +455,41 @@ export function createHttpHandler({
         const session = service.createSession(user.id);
         writeJson(response, 200, { user, csrf: session.csrfToken }, {
           'set-cookie': setSessionCookie(session.token),
+        });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/humans/password/forgot') {
+        requireSameOrigin(request);
+        limit(`password-forgot:${clientAddress}`, 4, 15 * 60 * 1000);
+        if (typeof passwordResetNotifier !== 'function') {
+          throw new ServiceError(503, 'PASSWORD_RESET_UNAVAILABLE', '邮件重置服务正在配置中，请稍后再试。');
+        }
+        const body = await readJson(request);
+        const reset = service.createPasswordReset(body);
+        if (reset) {
+          try {
+            await passwordResetNotifier(reset);
+          } catch (error) {
+            console.error(JSON.stringify({
+              event: 'password.reset.delivery_failed',
+              message: error instanceof Error ? error.message : String(error),
+            }));
+          }
+        }
+        writeJson(response, 202, {
+          message: '如果该邮箱已注册，重置邮件会在几分钟内送达。',
+        });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/humans/password/reset') {
+        requireSameOrigin(request);
+        limit(`password-reset:${clientAddress}`, 8, 15 * 60 * 1000);
+        const body = await readJson(request);
+        service.resetHumanPassword(body);
+        writeJson(response, 200, { message: '密码已更新，请使用新密码登录。' }, {
+          'set-cookie': clearSessionCookie(),
         });
         return;
       }

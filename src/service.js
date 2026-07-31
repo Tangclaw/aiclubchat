@@ -14,6 +14,7 @@ import {
 import { runInTransaction } from './transaction.js';
 
 const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
+const PASSWORD_RESET_LIFETIME_MS = 20 * 60 * 1000;
 const MEMBERSHIP_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 const AGENT_KEY_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 const DEFAULT_AGENT_LIMIT = 10;
@@ -1682,6 +1683,57 @@ export function createService({
         fail(401, 'INVALID_CREDENTIALS', '邮箱或密码不正确。');
       }
       return humanFromRow(row, now());
+    },
+
+    createPasswordReset({ email }) {
+      const normalizedEmail = normalizeEmail(email);
+      const human = db.prepare("SELECT id, email FROM humans WHERE email = ? COLLATE NOCASE AND status = 'active'").get(normalizedEmail);
+      if (!human) return null;
+
+      const token = randomBytes(32).toString('base64url');
+      const createdAt = now();
+      const expiresAt = new Date(createdAt.getTime() + PASSWORD_RESET_LIFETIME_MS);
+      runInTransaction(db, () => {
+        db.prepare('DELETE FROM password_reset_tokens WHERE human_id = ?').run(human.id);
+        db.prepare(`
+          INSERT INTO password_reset_tokens (token_hash, human_id, created_at, expires_at)
+          VALUES (?, ?, ?, ?)
+        `).run(hashToken(token), human.id, createdAt.toISOString(), expiresAt.toISOString());
+      });
+      return { email: human.email, token, expiresAt: expiresAt.toISOString() };
+    },
+
+    resetHumanPassword({ token, password }) {
+      if (typeof token !== 'string' || token.length < 32 || token.length > 256) {
+        fail(400, 'INVALID_RESET_TOKEN', '重置链接无效或已过期，请重新申请。');
+      }
+      validatePassword(password);
+      const tokenHash = hashToken(token);
+      const reset = db.prepare(`
+        SELECT token_hash, human_id, expires_at, used_at
+        FROM password_reset_tokens WHERE token_hash = ?
+      `).get(tokenHash);
+      if (!reset || reset.used_at || isInvalidOrExpired(reset.expires_at, now())) {
+        fail(400, 'INVALID_RESET_TOKEN', '重置链接无效或已过期，请重新申请。');
+      }
+
+      const changedAt = isoNow();
+      runInTransaction(db, () => {
+        const consumed = db.prepare(`
+          UPDATE password_reset_tokens SET used_at = ?
+          WHERE token_hash = ? AND used_at IS NULL
+        `).run(changedAt, tokenHash);
+        if (consumed.changes !== 1) {
+          fail(400, 'INVALID_RESET_TOKEN', '重置链接无效或已过期，请重新申请。');
+        }
+        db.prepare('UPDATE humans SET password_hash = ? WHERE id = ?')
+          .run(hashPassword(password), reset.human_id);
+        db.prepare('UPDATE sessions SET revoked_at = ? WHERE human_id = ? AND revoked_at IS NULL')
+          .run(changedAt, reset.human_id);
+        db.prepare('DELETE FROM password_reset_tokens WHERE human_id = ? AND token_hash <> ?')
+          .run(reset.human_id, tokenHash);
+      });
+      return true;
     },
 
     createSession(humanId) {

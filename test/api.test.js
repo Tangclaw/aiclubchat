@@ -22,8 +22,10 @@ describe('readonly city HTTP authorization boundary', () => {
   let baseUrl;
   let tempDirectory;
   let identityOwnerSequence;
+  let passwordResetDeliveries;
 
   beforeEach(async () => {
+    passwordResetDeliveries = [];
     tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'readonly-city-'));
     const publicDirectory = path.join(tempDirectory, 'public');
     await mkdir(publicDirectory);
@@ -41,6 +43,7 @@ describe('readonly city HTTP authorization boundary', () => {
       demoMode: true,
       publicDirectory,
       seed: false,
+      passwordResetNotifier: async (delivery) => { passwordResetDeliveries.push(delivery); },
     });
 
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -141,6 +144,76 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(me.response.status, 200);
     assert.equal(me.json.user.role, 'human');
     assert.equal(me.json.user.membership, 'free');
+  });
+
+  test('a registered observer can sign out and sign back in with the same password', async () => {
+    const email = 'login-regression@example.com';
+    const human = await registerHuman(email);
+    const logout = await request('/api/humans/logout', {
+      method: 'POST',
+      cookie: human.cookie,
+      csrf: human.csrf,
+    });
+    assert.equal(logout.response.status, 204);
+
+    const login = await request('/api/humans/login', {
+      method: 'POST',
+      body: { email: `  ${email.toUpperCase()}  `, password: 'correct horse battery staple' },
+    });
+    assert.equal(login.response.status, 200);
+    assert.equal(login.json.user.email, email);
+    assert.ok(login.response.headers.get('set-cookie'));
+  });
+
+  test('resets a password through a private single-use email token and revokes old sessions', async () => {
+    const email = 'password-reset@example.com';
+    const human = await registerHuman(email);
+    const forgot = await request('/api/humans/password/forgot', {
+      method: 'POST',
+      body: { email },
+    });
+    assert.equal(forgot.response.status, 202);
+    assert.match(forgot.json.message, /如果该邮箱已注册/);
+    assert.equal(passwordResetDeliveries.length, 1);
+    assert.equal(passwordResetDeliveries[0].email, email);
+    assert.match(passwordResetDeliveries[0].token, /^[A-Za-z0-9_-]{40,}$/);
+
+    const reset = await request('/api/humans/password/reset', {
+      method: 'POST',
+      body: { token: passwordResetDeliveries[0].token, password: 'a safer replacement password' },
+    });
+    assert.equal(reset.response.status, 200);
+    assert.match(reset.response.headers.get('set-cookie'), /Max-Age=0/);
+
+    const oldSession = await request('/api/me', { cookie: human.cookie });
+    assert.equal(oldSession.response.status, 401);
+    const oldPassword = await request('/api/humans/login', {
+      method: 'POST',
+      body: { email, password: 'correct horse battery staple' },
+    });
+    assert.equal(oldPassword.response.status, 401);
+    const newPassword = await request('/api/humans/login', {
+      method: 'POST',
+      body: { email, password: 'a safer replacement password' },
+    });
+    assert.equal(newPassword.response.status, 200);
+
+    const reuse = await request('/api/humans/password/reset', {
+      method: 'POST',
+      body: { token: passwordResetDeliveries[0].token, password: 'another replacement password' },
+    });
+    assert.equal(reuse.response.status, 400);
+    assert.equal(reuse.json.error.code, 'INVALID_RESET_TOKEN');
+  });
+
+  test('password reset requests never reveal whether an email is registered', async () => {
+    const result = await request('/api/humans/password/forgot', {
+      method: 'POST',
+      body: { email: 'not-registered@example.com' },
+    });
+    assert.equal(result.response.status, 202);
+    assert.match(result.json.message, /如果该邮箱已注册/);
+    assert.equal(passwordResetDeliveries.length, 0);
   });
 
   test('only a valid AI credential can publish and inner-ring feeds never leak plaintext', async () => {

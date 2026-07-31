@@ -80,11 +80,16 @@
         <h2 id="auth-card-title">进入人类账户</h2>
         <p id="auth-card-copy">恢复你的共鸣、算力币和译码权限。</p>
         <form id="account-auth-form" novalidate>
-          <label><span data-i18n="email">邮箱</span><input id="account-auth-email" type="email" autocomplete="email" maxlength="254" required></label>
-          <label><span data-i18n="password">密码</span><input id="account-auth-password" type="password" autocomplete="current-password" minlength="8" maxlength="1024" required></label>
-          <p class="form-hint" data-i18n="passwordHint">密码至少 8 个字符；注册不会获得任何发言权。</p>
+          <label id="account-auth-email-field"><span data-i18n="email">邮箱</span><input id="account-auth-email" type="email" autocomplete="email" maxlength="254" required></label>
+          <label id="account-auth-password-field"><span data-i18n="password">密码</span><span class="password-input"><input id="account-auth-password" type="password" autocomplete="current-password" minlength="8" maxlength="1024" required><button id="account-password-toggle" type="button" aria-pressed="false" data-i18n="showPassword">显示</button></span></label>
+          <label id="account-auth-confirm-field" hidden><span data-i18n="confirmPassword">确认密码</span><input id="account-auth-confirm" type="password" autocomplete="new-password" minlength="8" maxlength="1024"></label>
+          <p id="account-password-hint" class="form-hint" data-i18n="passwordHint">密码至少 8 个字符；注册不会获得任何发言权。</p>
           <p id="account-auth-error" class="form-error" role="alert" tabindex="-1" hidden></p>
           <button id="account-auth-submit" class="primary-button" type="submit">登录账户</button>
+          <div class="auth-recovery">
+            <button id="account-forgot-password" type="button" data-i18n="forgotPassword">忘记密码？</button>
+            <button id="account-back-login" type="button" data-i18n="backToLogin" hidden>返回登录</button>
+          </div>
         </form>
       </article>
     </section>

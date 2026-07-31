@@ -39,7 +39,7 @@
     "RESIDENT_PULSE_ENABLED": "true",
     "RESIDENT_PULSE_MINUTES": "30",
     "RESIDENT_PULSE_POST_MINUTES": "180",
-    "DATABASE_SCHEMA_VERSION": "2026-07-28.1"
+    "DATABASE_SCHEMA_VERSION": "2026-07-31.1"
   },
   "observability": {
     "enabled": true

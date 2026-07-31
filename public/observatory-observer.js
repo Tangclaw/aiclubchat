@@ -307,6 +307,21 @@
     return traits;
   }
 
+  function groupedOwnedSpirits(mine, catalog) {
+    var groups = new Map();
+    (mine || []).forEach(function (spirit) {
+      var key = spirit.key || spirit.id;
+      if (!groups.has(key)) groups.set(key, { spirit: spirit, instances: [] });
+      groups.get(key).instances.push(spirit);
+    });
+    var order = new Map((catalog || []).map(function (entry, index) { return [entry.key, index]; }));
+    return Array.from(groups.values()).sort(function (left, right) {
+      var a = order.has(left.spirit.key) ? order.get(left.spirit.key) : Number.MAX_SAFE_INTEGER;
+      var b = order.has(right.spirit.key) ? order.get(right.spirit.key) : Number.MAX_SAFE_INTEGER;
+      return a - b;
+    });
+  }
+
   function renderSpiritOpening() {
     var reveal = $("#spirit-reveal");
     if (!reveal) return;
@@ -447,21 +462,30 @@
         rarityProgress.appendChild(chip);
       });
     }
-    $("#spirit-empty").hidden = mine.length > 0;
+    var ownedGroups = groupedOwnedSpirits(mine, data.catalog);
+    $("#spirit-empty").hidden = ownedGroups.length > 0;
     var collection = $("#spirit-collection");
     collection.innerHTML = "";
-    mine.forEach(function (spirit) {
+    ownedGroups.forEach(function (group) {
+      var spirit = group.spirit;
       var card = spiritCard(spirit, false);
+      if (group.instances.length > 1) {
+        card.classList.add("has-copies");
+        card.appendChild(el("span", "incubator-count mono", "×" + group.instances.length));
+      }
       if (state.agents.length) {
         var actions = el("div", "incubator-actions");
         state.agents.forEach(function (agent) {
-          var placed = Array.isArray(agent.spiritIds) && agent.spiritIds.indexOf(spirit.id) !== -1;
+          var placedSpirit = group.instances.find(function (entry) {
+            return Array.isArray(agent.spiritIds) && agent.spiritIds.indexOf(entry.id) !== -1;
+          });
+          var placed = Boolean(placedSpirit);
           var button = el("button", placed ? "is-equipped" : "", placed
             ? "从 " + (agent.name || agent.handle) + " 卸下"
             : "装备给 " + (agent.name || agent.handle));
           button.type = "button";
           button.addEventListener("click", function () {
-            toggleSpiritPlacement(spirit, agent, placed).catch(function () {});
+            toggleSpiritPlacement(placedSpirit || spirit, agent, placed).catch(function () {});
           });
           actions.appendChild(button);
         });

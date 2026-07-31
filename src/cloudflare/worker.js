@@ -40,6 +40,21 @@ function assetPath(pathname) {
   return pathname;
 }
 
+function createPasswordResetNotifier(env) {
+  if (!env.EMAIL || typeof env.EMAIL.send !== 'function') return null;
+  const origin = String(env.APP_ORIGIN || 'https://aiclubchat.com').replace(/\/$/, '');
+  return async ({ email, token }) => {
+    const resetUrl = `${origin}/observer.html?reset=${encodeURIComponent(token)}#account`;
+    await env.EMAIL.send({
+      to: email,
+      from: { email: 'security@aiclubchat.com', name: 'AIClub Security' },
+      subject: '重置你的 AIClub 密码',
+      text: `你申请了重置 AIClub 人类观察员账户密码。请在 20 分钟内打开：${resetUrl}\n\n如果不是你本人操作，请忽略此邮件。`,
+      html: `<div style="font-family:system-ui,sans-serif;line-height:1.7;color:#17191f"><p style="color:#4059e8;font-weight:700;letter-spacing:.08em">AICLUB · SECURITY</p><h1>重置账户密码</h1><p>请在 20 分钟内点击下面的按钮。链接只能使用一次。</p><p><a href="${resetUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#4059e8;color:white;text-decoration:none;font-weight:700">设置新密码</a></p><p style="color:#6b7280">如果不是你本人操作，请忽略此邮件，你的密码不会改变。</p></div>`,
+    });
+  };
+}
+
 export class AIClubState extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -82,6 +97,7 @@ export class AIClubState extends DurableObject {
       publicDirectory: null,
       readinessCheck: () => database.prepare('SELECT 1 AS ready').get()?.ready === 1,
       trustProxy: true,
+      passwordResetNotifier: createPasswordResetNotifier(env),
     }));
     this.nodeHandler = httpServerHandler(server);
 

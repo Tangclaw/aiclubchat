@@ -93,6 +93,8 @@ test('makes the appearance blind box reachable from the active observatory accou
   assert.match(observatoryObserverScript, /function renderSpiritOpening\(\)/);
   assert.match(observatoryObserverScript, /is-opening-stage/);
   assert.match(observatoryObserverScript, /function spiritTraits\(spirit\)/);
+  assert.match(observatoryObserverScript, /function groupedOwnedSpirits\(mine, catalog\)/);
+  assert.match(observatoryObserverScript, /incubator-count mono/);
   assert.match(observatoryObserverScript, /Promise\.all\(\[loadAgents\(\), loadSpirits\(\)\]\)/);
   assert.match(observatoryPagesCss, /\.incubator-deck/);
   assert.match(observatoryPagesCss, /\.incubator-deck\.is-opening/);
@@ -100,6 +102,8 @@ test('makes the appearance blind box reachable from the active observatory accou
   assert.match(observatoryPagesCss, /@keyframes incubator-box-ritual/);
   assert.match(observerScript, /node\('div', 'spirit-reveal-actions'\)/);
   assert.match(observerScript, /function renderSpiritOpening\(\)/);
+  assert.match(observerScript, /function groupedOwnedSpirits\(mine, catalog\)/);
+  assert.match(observerScript, /spirit-copy-count/);
   assert.match(observerHtml, /id="spirit-progress-percent"/);
   assert.match(observerScript, /spiritProgress:\s*\$\('#spirit-progress'\)/);
   assert.match(observerCss, /@keyframes spirit-orbit/);
@@ -927,6 +931,11 @@ test('keeps human identity and wallet details on a dedicated private account rou
   assert.match(observerHtml, /id="account-wallet-balance"/);
   assert.match(observerHtml, /id="account-membership"/);
   assert.match(observerHtml, /id="account-auth-form"/);
+  assert.match(observerHtml, /id="account-auth-confirm"[^>]+autocomplete="new-password"/);
+  assert.match(observerHtml, /id="account-password-hint"/);
+  assert.match(observerHtml, /id="account-password-toggle"[^>]+aria-pressed="false"/);
+  assert.match(observerHtml, /id="account-forgot-password"/);
+  assert.match(observerHtml, /id="account-back-login"/);
   assert.match(observerHtml, /href="\/"/);
   assert.match(observerScript, /\/api\/session/);
   assert.match(observerScript, /\/api\/wallet/);
@@ -934,6 +943,11 @@ test('keeps human identity and wallet details on a dedicated private account rou
   assert.match(observerScript, /\/api\/membership\/activate/);
   assert.match(observerHtml, /60 算力币 · 7 天/);
   assert.match(observerScript, /\/api\/humans\/logout/);
+  assert.match(observerScript, /\/api\/humans\/password\/forgot/);
+  assert.match(observerScript, /\/api\/humans\/password\/reset/);
+  assert.match(observerScript, /cleanUrl\.searchParams\.delete\('reset'\)/);
+  assert.match(observerCss, /\.password-input\s*\{/);
+  assert.match(observerCss, /\.auth-recovery\s*\{/);
   assert.match(observerCss, /@media \(max-width:\s*720px\)/);
   assert.doesNotMatch(observerScript, /innerHTML|insertAdjacentHTML/);
 });

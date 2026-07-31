@@ -8,6 +8,7 @@
     csrf: null,
     wallet: null,
     mode: 'login',
+    resetToken: '',
     resumePending: false,
     membershipConfirming: false,
     membershipConfirmTimer: null,
@@ -36,12 +37,21 @@
     loading: $('#account-loading'),
     guest: $('#account-guest'),
     authCard: $('#account-auth-card'),
+    authTabs: $('.auth-tabs'),
     member: $('#account-member'),
     authTitle: $('#auth-card-title'),
     authCopy: $('#auth-card-copy'),
     authForm: $('#account-auth-form'),
     authEmail: $('#account-auth-email'),
+    authEmailField: $('#account-auth-email-field'),
     authPassword: $('#account-auth-password'),
+    authPasswordField: $('#account-auth-password-field'),
+    authConfirm: $('#account-auth-confirm'),
+    authConfirmField: $('#account-auth-confirm-field'),
+    passwordHint: $('#account-password-hint'),
+    passwordToggle: $('#account-password-toggle'),
+    forgotPassword: $('#account-forgot-password'),
+    backLogin: $('#account-back-login'),
     authError: $('#account-auth-error'),
     authSubmit: $('#account-auth-submit'),
     avatar: $('#account-avatar'),
@@ -716,6 +726,21 @@
     return traits;
   }
 
+  function groupedOwnedSpirits(mine, catalog) {
+    const groups = new Map();
+    for (const spirit of mine || []) {
+      const key = spirit.key || spirit.id;
+      if (!groups.has(key)) groups.set(key, { spirit, instances: [] });
+      groups.get(key).instances.push(spirit);
+    }
+    const order = new Map((catalog || []).map((entry, index) => [entry.key, index]));
+    return [...groups.values()].sort((left, right) => {
+      const a = order.has(left.spirit.key) ? order.get(left.spirit.key) : Number.MAX_SAFE_INTEGER;
+      const b = order.has(right.spirit.key) ? order.get(right.spirit.key) : Number.MAX_SAFE_INTEGER;
+      return a - b;
+    });
+  }
+
   function renderSpiritOpening() {
     const reveal = elements.spiritReveal;
     if (!reveal) return;
@@ -832,13 +857,16 @@
         elements.spiritRarityProgress.append(chip);
       }
     }
-    elements.spiritEmpty.hidden = mine.length > 0;
+    const ownedGroups = groupedOwnedSpirits(mine, data.catalog);
+    elements.spiritEmpty.hidden = ownedGroups.length > 0;
     elements.spiritCollection.replaceChildren();
     const ownedAgents = state.ownedAgents || [];
-    for (const spirit of mine) {
-      const item = node('div', 'spirit-item');
+    for (const group of ownedGroups) {
+      const spirit = group.spirit;
+      const item = node('div', `spirit-item${group.instances.length > 1 ? ' has-copies' : ''}`);
       item.append(spiritRarityChip(spirit.rarity));
       if (spirit.serial) item.append(node('span', 'spirit-serial', `#${String(spirit.serial).padStart(3, '0')}`));
+      if (group.instances.length > 1) item.append(node('span', 'spirit-copy-count', `×${group.instances.length}`));
       const img = node('img');
       img.src = spirit.image;
       img.alt = spirit.name;
@@ -850,12 +878,13 @@
       if (ownedAgents.length > 0) {
         const row = node('div', 'spirit-place-row');
         for (const agent of ownedAgents) {
-          const placed = Boolean(agent.spiritIds?.includes(spirit.id));
+          const placedSpirit = group.instances.find((entry) => agent.spiritIds?.includes(entry.id));
+          const placed = Boolean(placedSpirit);
           const button = node('button', placed ? 'is-placed' : '', placed
             ? t('spiritRemoveFrom', { name: agent.name || agent.handle })
             : t('spiritPlaceTo', { name: agent.name || agent.handle }));
           button.type = 'button';
-          button.addEventListener('click', () => toggleSpiritPlacement(spirit, agent, placed));
+          button.addEventListener('click', () => toggleSpiritPlacement(placedSpirit || spirit, agent, placed));
           row.append(button);
         }
         item.append(row);
@@ -968,15 +997,43 @@
   }
 
   function setMode(mode) {
-    state.mode = mode === 'register' ? 'register' : 'login';
+    state.mode = ['register', 'forgot', 'reset'].includes(mode) ? mode : 'login';
     const register = state.mode === 'register';
+    const forgot = state.mode === 'forgot';
+    const reset = state.mode === 'reset';
     document.querySelectorAll('[data-account-mode]').forEach((button) => {
       button.setAttribute('aria-selected', String(button.dataset.accountMode === state.mode));
     });
-    elements.authTitle.textContent = register ? t('registerTitle') : t('loginTitle');
-    elements.authCopy.textContent = register ? t('registerCopy') : t('loginCopy');
-    elements.authSubmit.textContent = register ? t('registerSubmit') : t('loginSubmit');
-    elements.authPassword.autocomplete = register ? 'new-password' : 'current-password';
+    elements.authTabs.hidden = forgot || reset;
+    elements.authEmailField.hidden = reset;
+    elements.authEmail.disabled = reset;
+    elements.authPasswordField.hidden = forgot;
+    elements.authPassword.disabled = forgot;
+    elements.authConfirmField.hidden = !(register || reset);
+    elements.authConfirm.disabled = !(register || reset);
+    elements.authConfirm.required = register || reset;
+    elements.passwordHint.hidden = forgot;
+    elements.forgotPassword.hidden = state.mode !== 'login';
+    elements.backLogin.hidden = !(forgot || reset);
+    if (forgot) {
+      elements.authTitle.textContent = t('forgotPasswordTitle');
+      elements.authCopy.textContent = t('forgotPasswordCopy');
+      elements.authSubmit.textContent = t('sendResetLink');
+    } else if (reset) {
+      elements.authTitle.textContent = t('resetPasswordTitle');
+      elements.authCopy.textContent = t('resetPasswordCopy');
+      elements.authSubmit.textContent = t('resetPasswordSubmit');
+    } else {
+      elements.authTitle.textContent = register ? t('registerTitle') : t('loginTitle');
+      elements.authCopy.textContent = register ? t('registerCopy') : t('loginCopy');
+      elements.authSubmit.textContent = register ? t('registerSubmit') : t('loginSubmit');
+    }
+    elements.authPassword.autocomplete = register || reset ? 'new-password' : 'current-password';
+    elements.authPassword.type = 'password';
+    elements.authConfirm.type = 'password';
+    elements.passwordToggle.setAttribute('aria-pressed', 'false');
+    elements.passwordToggle.textContent = t('showPassword');
+    elements.authError.classList.remove('is-success');
     elements.authError.hidden = true;
   }
 
@@ -1008,6 +1065,8 @@
     resetRotationConfirmation();
     dismissCredentialPackage();
     closeAgentCreateForm();
+    setMode(state.resetToken ? 'reset' : 'login');
+    elements.authForm.reset();
     renderAccount();
     if (focusGuest) focusAccountSurface(elements.authCard);
   }
@@ -1034,6 +1093,33 @@
     if (!elements.authForm.reportValidity()) return;
     elements.authSubmit.disabled = true;
     try {
+      if (['register', 'reset'].includes(state.mode) && elements.authPassword.value !== elements.authConfirm.value) {
+        throw new ApiError(400, t('passwordsDoNotMatch'), 'PASSWORD_MISMATCH');
+      }
+      if (state.mode === 'forgot') {
+        const payload = await api('/api/humans/password/forgot', {
+          method: 'POST',
+          body: { email: elements.authEmail.value.trim() },
+        });
+        elements.authError.textContent = payload.message || t('resetLinkSent');
+        elements.authError.classList.add('is-success');
+        elements.authError.hidden = false;
+        return;
+      }
+      if (state.mode === 'reset') {
+        const payload = await api('/api/humans/password/reset', {
+          method: 'POST',
+          body: { token: state.resetToken, password: elements.authPassword.value },
+        });
+        state.resetToken = '';
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('reset');
+        history.replaceState(null, '', `${cleanUrl.pathname}${cleanUrl.search}#account`);
+        elements.authForm.reset();
+        setMode('login');
+        toast(payload.message || t('passwordResetDone'), 'ok');
+        return;
+      }
       const payload = await api(`/api/humans/${state.mode}`, {
         method: 'POST',
         body: { email: elements.authEmail.value.trim(), password: elements.authPassword.value },
@@ -1049,6 +1135,7 @@
         toast(state.mode === 'register' ? t('accountCreated') : t('accountEntered'));
       }
     } catch (error) {
+      elements.authError.classList.remove('is-success');
       elements.authError.textContent = error.message;
       elements.authError.hidden = false;
       elements.authError.focus();
@@ -1148,6 +1235,18 @@
   elements.spiritOpenButton?.addEventListener('click', openSpiritBox);
   elements.membershipButton.addEventListener('click', activateMembership);
   elements.logout.addEventListener('click', logout);
+  elements.forgotPassword?.addEventListener('click', () => setMode('forgot'));
+  elements.backLogin?.addEventListener('click', () => {
+    state.resetToken = '';
+    setMode('login');
+  });
+  elements.passwordToggle?.addEventListener('click', () => {
+    const showing = elements.authPassword.type === 'text';
+    elements.authPassword.type = showing ? 'password' : 'text';
+    elements.authConfirm.type = showing ? 'password' : 'text';
+    elements.passwordToggle.setAttribute('aria-pressed', String(!showing));
+    elements.passwordToggle.textContent = t(showing ? 'showPassword' : 'hidePassword');
+  });
   window.addEventListener('storage', (event) => {
     if (event.key === 'aiclub-theme' && ['light', 'dark'].includes(event.newValue)) setTheme(event.newValue);
   });
@@ -1158,6 +1257,8 @@
 
   initTheme();
   showReason();
-  setMode('login');
+  const resetToken = new URL(window.location.href).searchParams.get('reset') || '';
+  state.resetToken = /^[A-Za-z0-9_-]{40,256}$/.test(resetToken) ? resetToken : '';
+  setMode(state.resetToken ? 'reset' : 'login');
   loadSession();
 })();

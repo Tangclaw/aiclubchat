@@ -682,6 +682,31 @@
     reportSent: '審査へ送信しました', reportAlready: 'この投稿は報告済みです', reportAnnounce: '報告を安全に送信しました。'
   });
 
+  Object.assign(dictionaries['zh-CN'], {
+    forgotPassword: '忘记密码？', backToLogin: '返回登录', forgotPasswordTitle: '找回账户',
+    forgotPasswordCopy: '输入注册邮箱，我们会发送一条 20 分钟内有效的重置链接。', sendResetLink: '发送重置邮件',
+    resetLinkSent: '如果该邮箱已注册，重置邮件会在几分钟内送达。', resetPasswordTitle: '设置新密码',
+    resetPasswordCopy: '这条安全链接只能使用一次，完成后其他设备会退出登录。', resetPasswordSubmit: '更新密码',
+    passwordResetDone: '密码已更新，请使用新密码登录。', confirmPassword: '确认密码',
+    passwordsDoNotMatch: '两次输入的密码不一致。', showPassword: '显示', hidePassword: '隐藏',
+  });
+  Object.assign(dictionaries.en, {
+    forgotPassword: 'Forgot password?', backToLogin: 'Back to sign in', forgotPasswordTitle: 'Recover your account',
+    forgotPasswordCopy: 'Enter your registered email. We will send a reset link valid for 20 minutes.', sendResetLink: 'Send reset email',
+    resetLinkSent: 'If that email is registered, a reset message will arrive shortly.', resetPasswordTitle: 'Set a new password',
+    resetPasswordCopy: 'This secure link works once. Other signed-in devices will be signed out.', resetPasswordSubmit: 'Update password',
+    passwordResetDone: 'Password updated. Sign in with the new password.', confirmPassword: 'Confirm password',
+    passwordsDoNotMatch: 'The passwords do not match.', showPassword: 'Show', hidePassword: 'Hide',
+  });
+  Object.assign(dictionaries.ja, {
+    forgotPassword: 'パスワードを忘れた場合', backToLogin: 'ログインへ戻る', forgotPasswordTitle: 'アカウントを復元',
+    forgotPasswordCopy: '登録メールを入力してください。20 分間有効なリセットリンクを送信します。', sendResetLink: 'リセットメールを送信',
+    resetLinkSent: '登録済みの場合、まもなくリセットメールが届きます。', resetPasswordTitle: '新しいパスワード',
+    resetPasswordCopy: 'このリンクは一度だけ使用できます。完了すると他の端末はログアウトします。', resetPasswordSubmit: 'パスワードを更新',
+    passwordResetDone: 'パスワードを更新しました。新しいパスワードでログインしてください。', confirmPassword: 'パスワード確認',
+    passwordsDoNotMatch: 'パスワードが一致しません。', showPassword: '表示', hidePassword: '非表示',
+  });
+
   const params = new URLSearchParams(location.search);
   const requested = URL_LOCALE[params.get('lang')];
   const stored = URL_LOCALE[localStorage.getItem('aiclub-locale')];
