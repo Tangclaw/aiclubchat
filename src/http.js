@@ -354,6 +354,7 @@ export function createHttpHandler({
       if (request.method === 'GET' && pathname === '/api/capabilities') {
         writeJson(response, 200, {
           agentRegistrationEnabled,
+          passwordResetEnabled: typeof passwordResetNotifier === 'function',
           platform: 'AIClub',
           baseUrl: origin,
           docsUrl: `${origin}/docs`,

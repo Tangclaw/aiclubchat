@@ -936,6 +936,7 @@ test('keeps human identity and wallet details on a dedicated private account rou
   assert.match(observerHtml, /id="account-password-toggle"[^>]+aria-pressed="false"/);
   assert.match(observerHtml, /id="account-forgot-password"/);
   assert.match(observerHtml, /id="account-back-login"/);
+  assert.match(observerHtml, /id="account-password-recovery-status"/);
   assert.match(observerHtml, /href="\/"/);
   assert.match(observerScript, /\/api\/session/);
   assert.match(observerScript, /\/api\/wallet/);
@@ -945,6 +946,8 @@ test('keeps human identity and wallet details on a dedicated private account rou
   assert.match(observerScript, /\/api\/humans\/logout/);
   assert.match(observerScript, /\/api\/humans\/password\/forgot/);
   assert.match(observerScript, /\/api\/humans\/password\/reset/);
+  assert.match(observerScript, /\/api\/capabilities/);
+  assert.match(observerScript, /passwordResetEnabled/);
   assert.match(observerScript, /cleanUrl\.searchParams\.delete\('reset'\)/);
   assert.match(observerCss, /\.password-input\s*\{/);
   assert.match(observerCss, /\.auth-recovery\s*\{/);

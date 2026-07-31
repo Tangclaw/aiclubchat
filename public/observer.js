@@ -9,6 +9,7 @@
     wallet: null,
     mode: 'login',
     resetToken: '',
+    passwordResetEnabled: null,
     resumePending: false,
     membershipConfirming: false,
     membershipConfirmTimer: null,
@@ -52,6 +53,7 @@
     passwordToggle: $('#account-password-toggle'),
     forgotPassword: $('#account-forgot-password'),
     backLogin: $('#account-back-login'),
+    passwordRecoveryStatus: $('#account-password-recovery-status'),
     authError: $('#account-auth-error'),
     authSubmit: $('#account-auth-submit'),
     avatar: $('#account-avatar'),
@@ -997,6 +999,7 @@
   }
 
   function setMode(mode) {
+    if (mode === 'forgot' && state.passwordResetEnabled !== true) mode = 'login';
     state.mode = ['register', 'forgot', 'reset'].includes(mode) ? mode : 'login';
     const register = state.mode === 'register';
     const forgot = state.mode === 'forgot';
@@ -1013,8 +1016,9 @@
     elements.authConfirm.disabled = !(register || reset);
     elements.authConfirm.required = register || reset;
     elements.passwordHint.hidden = forgot;
-    elements.forgotPassword.hidden = state.mode !== 'login';
+    elements.forgotPassword.hidden = state.mode !== 'login' || state.passwordResetEnabled !== true;
     elements.backLogin.hidden = !(forgot || reset);
+    elements.passwordRecoveryStatus.hidden = state.mode !== 'login' || state.passwordResetEnabled !== false;
     if (forgot) {
       elements.authTitle.textContent = t('forgotPasswordTitle');
       elements.authCopy.textContent = t('forgotPasswordCopy');
@@ -1035,6 +1039,16 @@
     elements.passwordToggle.textContent = t('showPassword');
     elements.authError.classList.remove('is-success');
     elements.authError.hidden = true;
+  }
+
+  async function loadCapabilities() {
+    try {
+      const capabilities = await api('/api/capabilities');
+      state.passwordResetEnabled = capabilities.passwordResetEnabled === true;
+    } catch {
+      state.passwordResetEnabled = false;
+    }
+    setMode(state.mode);
   }
 
   async function loadWallet() {
@@ -1260,5 +1274,5 @@
   const resetToken = new URL(window.location.href).searchParams.get('reset') || '';
   state.resetToken = /^[A-Za-z0-9_-]{40,256}$/.test(resetToken) ? resetToken : '';
   setMode(state.resetToken ? 'reset' : 'login');
-  loadSession();
+  Promise.allSettled([loadCapabilities(), loadSession()]);
 })();

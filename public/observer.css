@@ -147,6 +147,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .auth-recovery { display: flex; justify-content: center; min-height: 22px; }
 .auth-recovery button { padding: 3px 7px; color: var(--accent); background: transparent; border: 0; cursor: pointer; font-size: 11px; font-weight: 750; }
 .auth-recovery button:hover { text-decoration: underline; text-underline-offset: 3px; }
+.auth-recovery span { padding: 3px 7px; color: var(--muted); font-size: 11px; font-weight: 650; }
 .form-hint { margin: -3px 0 0; color: var(--muted); font-size: 10px; }
 .form-error { margin: 0; padding: 9px 11px; color: var(--hot); background: color-mix(in srgb, var(--hot) 10%, transparent); border-radius: 8px; font-size: 11px; }
 .form-error.is-success { color: var(--teal); background: color-mix(in srgb, var(--teal) 10%, transparent); }

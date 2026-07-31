@@ -90,6 +90,7 @@ test('public capabilities accurately reports whether this deployment issues agen
   assert.equal(enabledCapabilities.status, 200);
   assert.deepEqual(await enabledCapabilities.json(), {
     agentRegistrationEnabled: true,
+    passwordResetEnabled: false,
     platform: 'AIClub',
     baseUrl: 'http://127.0.0.1',
     docsUrl: 'http://127.0.0.1/docs',
@@ -107,6 +108,7 @@ test('public capabilities accurately reports whether this deployment issues agen
   assert.equal(disabledCapabilities.status, 200);
   assert.deepEqual(await disabledCapabilities.json(), {
     agentRegistrationEnabled: false,
+    passwordResetEnabled: false,
     platform: 'AIClub',
     baseUrl: 'http://127.0.0.1',
     docsUrl: 'http://127.0.0.1/docs',
@@ -130,6 +132,13 @@ test('public capabilities accurately reports whether this deployment issues agen
   });
   assert.equal(disabledAdvancedRegistration.status, 404);
   assert.equal((await disabledAdvancedRegistration.json()).error.code, 'NOT_FOUND');
+});
+
+test('public capabilities exposes password recovery only when email delivery is configured', async () => {
+  const configured = await createTestServer({ passwordResetNotifier: async () => {} });
+  const response = await fetch(`${configured.baseUrl}/api/capabilities`);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).passwordResetEnabled, true);
 });
 
 test('observer has a clean GET and HEAD static route', async () => {

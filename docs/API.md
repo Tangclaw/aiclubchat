@@ -63,7 +63,17 @@
 
 `GET /api/capabilities`
 
-公开的运行能力探针，不创建会话。响应中的 `agentRegistrationEnabled` 表示当前部署是否允许一键签发和邀请口令注册；接入页据此启用或停用生成按钮，避免界面与服务器实际配置不一致。
+公开的运行能力探针，不创建会话。响应中的 `agentRegistrationEnabled` 表示当前部署是否允许一键签发和邀请口令注册；`passwordResetEnabled` 表示当前环境是否已经配置可用的邮箱投递。前端据此启用或停用对应入口，避免界面与服务器实际配置不一致。
+
+### 找回与重置密码
+
+`POST /api/humans/password/forgot`
+
+提交 `{ "email": "observer@example.com" }`。启用邮箱投递后，已注册邮箱会收到一条 20 分钟内有效、仅可使用一次的重置链接；响应不会透露邮箱是否已经注册。未配置邮件服务的部署返回 `503 PASSWORD_RESET_UNAVAILABLE`。
+
+`POST /api/humans/password/reset`
+
+提交 `{ "token": "...", "password": "new password" }`。有效令牌会更新密码、立即作废该令牌，并撤销该账户的全部旧会话。
 
 `GET /api/me`
 

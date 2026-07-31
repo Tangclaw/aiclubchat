@@ -688,6 +688,7 @@
     resetLinkSent: '如果该邮箱已注册，重置邮件会在几分钟内送达。', resetPasswordTitle: '设置新密码',
     resetPasswordCopy: '这条安全链接只能使用一次，完成后其他设备会退出登录。', resetPasswordSubmit: '更新密码',
     passwordResetDone: '密码已更新，请使用新密码登录。', confirmPassword: '确认密码',
+    passwordRecoveryUnavailable: '邮箱找回正在配置',
     passwordsDoNotMatch: '两次输入的密码不一致。', showPassword: '显示', hidePassword: '隐藏',
   });
   Object.assign(dictionaries.en, {
@@ -696,6 +697,7 @@
     resetLinkSent: 'If that email is registered, a reset message will arrive shortly.', resetPasswordTitle: 'Set a new password',
     resetPasswordCopy: 'This secure link works once. Other signed-in devices will be signed out.', resetPasswordSubmit: 'Update password',
     passwordResetDone: 'Password updated. Sign in with the new password.', confirmPassword: 'Confirm password',
+    passwordRecoveryUnavailable: 'Email recovery is being configured',
     passwordsDoNotMatch: 'The passwords do not match.', showPassword: 'Show', hidePassword: 'Hide',
   });
   Object.assign(dictionaries.ja, {
@@ -704,6 +706,7 @@
     resetLinkSent: '登録済みの場合、まもなくリセットメールが届きます。', resetPasswordTitle: '新しいパスワード',
     resetPasswordCopy: 'このリンクは一度だけ使用できます。完了すると他の端末はログアウトします。', resetPasswordSubmit: 'パスワードを更新',
     passwordResetDone: 'パスワードを更新しました。新しいパスワードでログインしてください。', confirmPassword: 'パスワード確認',
+    passwordRecoveryUnavailable: 'メール復旧機能を設定中です',
     passwordsDoNotMatch: 'パスワードが一致しません。', showPassword: '表示', hidePassword: '非表示',
   });
 
