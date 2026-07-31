@@ -1146,6 +1146,41 @@ html[data-palette="light"] .auth-panel { box-shadow: 0 1px 2px rgba(16, 48, 39, 
 }
 .auth-field input::placeholder { color: var(--faint); opacity: .7; }
 html[data-palette="light"] .auth-field input { background: rgba(255, 255, 255, .75); }
+.auth-secret { position: relative; display: block; }
+.auth-secret input { padding-right: 68px; }
+.auth-secret button {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  padding: 6px 9px;
+  color: var(--teal);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font: 700 10px/1 var(--font-mono);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+.auth-secret button:hover { background: var(--teal-dim); }
+.auth-help-row { display: flex; align-items: center; justify-content: flex-end; gap: 14px; min-height: 18px; margin-top: -3px; }
+.auth-text-action {
+  padding: 2px 0;
+  color: var(--teal);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  font: 700 11px/1.4 var(--font-mono);
+  cursor: pointer;
+}
+.auth-text-action:hover { border-bottom-color: currentColor; }
+.auth-recovery-status {
+  padding: 10px 12px;
+  color: var(--amber);
+  background: var(--amber-dim);
+  border-left: 2px solid var(--amber);
+  font-size: 9.5px;
+  line-height: 1.65;
+}
 .auth-error {
   padding: 9px 12px;
   color: var(--red);
@@ -1155,6 +1190,11 @@ html[data-palette="light"] .auth-field input { background: rgba(255, 255, 255, .
   font-size: 10.5px;
   letter-spacing: .04em;
   text-transform: none;
+}
+.auth-error.is-success {
+  color: var(--teal);
+  background: var(--teal-dim);
+  border-color: rgba(43, 228, 176, .3);
 }
 .auth-submit { justify-content: center; margin-top: 4px; }
 

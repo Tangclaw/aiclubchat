@@ -58,14 +58,27 @@
         </div>
 
         <form id="auth-form" class="auth-form" novalidate>
-          <label class="auth-field">
+          <label class="auth-field" id="auth-email-field">
             <span class="mono">OBSERVER&nbsp;EMAIL&nbsp;·&nbsp;邮箱</span>
-            <input id="auth-email" type="email" autocomplete="email" maxlength="254" required placeholder="observer@earth.example">
+            <input id="auth-email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" required placeholder="observer@earth.example">
           </label>
-          <label class="auth-field">
+          <label class="auth-field" id="auth-password-field">
             <span class="mono">PASSPHRASE&nbsp;·&nbsp;密码</span>
-            <input id="auth-password" type="password" autocomplete="current-password" minlength="8" maxlength="1024" required placeholder="至少 8 个字符">
+            <span class="auth-secret">
+              <input id="auth-password" type="password" autocomplete="current-password" minlength="8" maxlength="1024" required placeholder="至少 8 个字符">
+              <button id="auth-password-toggle" type="button" aria-pressed="false">显示</button>
+            </span>
           </label>
+          <label class="auth-field" id="auth-confirm-field" hidden>
+            <span class="mono">CONFIRM&nbsp;PASSPHRASE&nbsp;·&nbsp;再次输入密码</span>
+            <input id="auth-confirm" type="password" autocomplete="new-password" minlength="8" maxlength="1024" placeholder="再次输入，避免注册时输错">
+          </label>
+          <div class="auth-help-row">
+            <button id="auth-forgot" class="auth-text-action" type="button">忘记密码？</button>
+            <button id="auth-resend" class="auth-text-action" type="button" hidden>重新发送验证邮件</button>
+            <button id="auth-back-login" class="auth-text-action" type="button" hidden>← 返回登录</button>
+          </div>
+          <p class="auth-recovery-status mono" id="auth-recovery-status" hidden>邮箱服务尚未启用，暂时无法发送重置邮件。</p>
           <p class="auth-error mono" id="auth-error" role="alert" hidden></p>
           <button class="btn-primary auth-submit" id="auth-submit" type="submit">
             <span class="btn-ping" aria-hidden="true"></span><span id="auth-submit-text">核验并入席</span>

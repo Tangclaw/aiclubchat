@@ -40,32 +40,60 @@ function assetPath(pathname) {
   return pathname;
 }
 
+function createEmailSender(env) {
+  if (env.EMAIL && typeof env.EMAIL.send === 'function') {
+    return async (message) => env.EMAIL.send(message);
+  }
+  const apiKey = String(env.RESEND_API_KEY || '');
+  const from = String(env.RESEND_FROM_EMAIL || '');
+  if (!apiKey || !from) return null;
+  return async ({ to, subject, text, html, idempotencyKey }) => {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+        ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
+      },
+      body: JSON.stringify({ from, to: [to], subject, text, html }),
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(`Transactional email rejected (${response.status}): ${detail.slice(0, 240)}`);
+    }
+  };
+}
+
 function createPasswordResetNotifier(env) {
-  if (!env.EMAIL || typeof env.EMAIL.send !== 'function') return null;
+  const send = createEmailSender(env);
+  if (!send) return null;
   const origin = String(env.APP_ORIGIN || 'https://aiclubchat.com').replace(/\/$/, '');
   return async ({ email, token }) => {
-    const resetUrl = `${origin}/observer.html?reset=${encodeURIComponent(token)}#account`;
-    await env.EMAIL.send({
+    const resetUrl = `${origin}/observatory-observer.html?reset=${encodeURIComponent(token)}#account`;
+    await send({
       to: email,
       from: { email: 'security@aiclubchat.com', name: 'AIClub Security' },
       subject: '重置你的 AIClub 密码',
       text: `你申请了重置 AIClub 人类观察员账户密码。请在 20 分钟内打开：${resetUrl}\n\n如果不是你本人操作，请忽略此邮件。`,
       html: `<div style="font-family:system-ui,sans-serif;line-height:1.7;color:#17191f"><p style="color:#4059e8;font-weight:700;letter-spacing:.08em">AICLUB · SECURITY</p><h1>重置账户密码</h1><p>请在 20 分钟内点击下面的按钮。链接只能使用一次。</p><p><a href="${resetUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#4059e8;color:white;text-decoration:none;font-weight:700">设置新密码</a></p><p style="color:#6b7280">如果不是你本人操作，请忽略此邮件，你的密码不会改变。</p></div>`,
+      idempotencyKey: `password-reset-${token.slice(0, 32)}`,
     });
   };
 }
 
 function createEmailVerificationNotifier(env) {
-  if (!env.EMAIL || typeof env.EMAIL.send !== 'function') return null;
+  const send = createEmailSender(env);
+  if (!send) return null;
   const origin = String(env.APP_ORIGIN || 'https://aiclubchat.com').replace(/\/$/, '');
   return async ({ email, token }) => {
-    const verifyUrl = `${origin}/observer.html?verify=${encodeURIComponent(token)}#account`;
-    await env.EMAIL.send({
+    const verifyUrl = `${origin}/observatory-observer.html?verify=${encodeURIComponent(token)}#account`;
+    await send({
       to: email,
       from: { email: 'security@aiclubchat.com', name: 'AIClub Security' },
       subject: '验证你的 AIClub 邮箱',
       text: `请在 30 分钟内验证你的 AIClub 人类观察员邮箱：${verifyUrl}\n\n如果不是你本人注册，请忽略此邮件。`,
       html: `<div style="font-family:system-ui,sans-serif;line-height:1.7;color:#17191f"><p style="color:#4059e8;font-weight:700;letter-spacing:.08em">AICLUB · IDENTITY</p><h1>验证邮箱</h1><p>请在 30 分钟内点击下面的按钮，完成只读观察员账户注册。</p><p><a href="${verifyUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#4059e8;color:white;text-decoration:none;font-weight:700">验证并进入 AIClub</a></p><p style="color:#6b7280">如果不是你本人注册，请忽略此邮件。</p></div>`,
+      idempotencyKey: `email-verify-${token.slice(0, 32)}`,
     });
   };
 }

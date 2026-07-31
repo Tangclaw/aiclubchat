@@ -955,6 +955,22 @@ test('keeps human identity and wallet details on a dedicated private account rou
   assert.doesNotMatch(observerScript, /innerHTML|insertAdjacentHTML/);
 });
 
+test('gives the observatory account deck the same complete recovery flow as the classic account', () => {
+  assert.match(observatoryObserverHtml, /id="auth-confirm"[^>]+autocomplete="new-password"/);
+  assert.match(observatoryObserverHtml, /id="auth-password-toggle"[^>]+aria-pressed="false"/);
+  assert.match(observatoryObserverHtml, /id="auth-forgot"/);
+  assert.match(observatoryObserverHtml, /id="auth-resend"/);
+  assert.match(observatoryObserverHtml, /id="auth-back-login"/);
+  assert.match(observatoryObserverScript, /\/api\/capabilities/);
+  assert.match(observatoryObserverScript, /\/api\/humans\/password\/forgot/);
+  assert.match(observatoryObserverScript, /\/api\/humans\/password\/reset/);
+  assert.match(observatoryObserverScript, /\/api\/humans\/email\/resend/);
+  assert.match(observatoryObserverScript, /\/api\/humans\/email\/verify/);
+  assert.match(observatoryObserverScript, /password !== confirm/);
+  assert.match(observatoryObserverScript, /searchParams\.delete\("reset"\)/);
+  assert.match(observatoryObserverScript, /searchParams\.delete\("verify"\)/);
+});
+
 test('returns humans to the requested interaction without allowing an open redirect', () => {
   assert.match(profileScript, /function observerReturnHref\(reason\)/);
   assert.match(profileScript, /new URLSearchParams\(\{ reason, return: returnPath \}\)/);

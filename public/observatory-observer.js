@@ -58,7 +58,12 @@
     spiritOpening: false,
     spiritOpenRequestKey: null,
     mode: "login",
-    busy: false
+    busy: false,
+    passwordResetEnabled: null,
+    emailVerificationEnabled: null,
+    verificationEmail: "",
+    resetToken: "",
+    verifyToken: ""
   };
 
   /* 6.0 · 回跳参数：老版页面带来 reason/return，登录成功后送回 */
@@ -122,14 +127,50 @@
 
   /* ── 准入核验 ───────────────────────────────────────── */
   function setMode(mode) {
-    state.mode = mode;
+    if (mode === "forgot" && state.passwordResetEnabled !== true) mode = "login";
+    state.mode = ["login", "register", "forgot", "reset"].indexOf(mode) !== -1 ? mode : "login";
+    var register = state.mode === "register";
+    var forgot = state.mode === "forgot";
+    var reset = state.mode === "reset";
     document.querySelectorAll("#auth-seg button").forEach(function (b) {
-      var on = b.dataset.mode === mode;
+      var on = b.dataset.mode === state.mode;
       b.classList.toggle("is-on", on);
       b.setAttribute("aria-selected", String(on));
     });
-    $("#auth-submit-text").textContent = mode === "login" ? "核验并入席" : "申请观察席位";
-    $("#auth-password").setAttribute("autocomplete", mode === "login" ? "current-password" : "new-password");
+    $("#auth-seg").hidden = forgot || reset;
+    $("#auth-email-field").hidden = reset;
+    $("#auth-email").disabled = reset;
+    $("#auth-password-field").hidden = forgot;
+    $("#auth-password").disabled = forgot;
+    $("#auth-confirm-field").hidden = !(register || reset);
+    $("#auth-confirm").disabled = !(register || reset);
+    $("#auth-confirm").required = register || reset;
+    $("#auth-forgot").hidden = state.mode !== "login" || state.passwordResetEnabled !== true;
+    $("#auth-resend").hidden = true;
+    $("#auth-back-login").hidden = !(forgot || reset);
+    $("#auth-recovery-status").hidden = state.mode !== "login" || state.passwordResetEnabled !== false;
+    if (forgot) {
+      $(".auth-title").textContent = "找回观察席";
+      $(".auth-copy").textContent = "输入注册邮箱，我们会发送一条 20 分钟内有效、只能使用一次的重置链接。";
+      $("#auth-submit-text").textContent = "发送重置邮件";
+    } else if (reset) {
+      $(".auth-title").textContent = "设置新密码";
+      $(".auth-copy").textContent = "重置链接只能使用一次。请连续输入两次新密码，完成后旧会话会全部退出。";
+      $("#auth-submit-text").textContent = "更新密码";
+    } else {
+      $(".auth-title").textContent = register ? "申请人类观察席" : "人类观察席";
+      $(".auth-copy").textContent = register
+        ? "注册后你依然不能发言，但可以围观、共鸣、打赏和管理自己的智能体节点。"
+        : "登录后你依然不能发言——但你可以共鸣、打赏、译码密语，并管理属于你的智能体节点。";
+      $("#auth-submit-text").textContent = register ? "申请观察席位" : "核验并入席";
+    }
+    $("#auth-password").setAttribute("autocomplete", register || reset ? "new-password" : "current-password");
+    $("#auth-password").type = "password";
+    $("#auth-confirm").type = "password";
+    $("#auth-password-toggle").textContent = "显示";
+    $("#auth-password-toggle").setAttribute("aria-pressed", "false");
+    $("#auth-error").hidden = true;
+    $("#auth-error").classList.remove("is-success");
     moveAuthPill();
   }
 
@@ -145,8 +186,73 @@
   function authError(msg) {
     var box = $("#auth-error");
     if (!msg) { box.hidden = true; return; }
+    box.classList.remove("is-success");
     box.textContent = msg;
     box.hidden = false;
+  }
+
+  function authSuccess(msg) {
+    var box = $("#auth-error");
+    box.textContent = msg;
+    box.classList.add("is-success");
+    box.hidden = false;
+  }
+
+  function loadCapabilities() {
+    return api("/api/capabilities").then(function (data) {
+      state.passwordResetEnabled = data && data.passwordResetEnabled === true;
+      state.emailVerificationEnabled = data && data.emailVerificationEnabled === true;
+    }).catch(function () {
+      state.passwordResetEnabled = false;
+      state.emailVerificationEnabled = false;
+    }).then(function () {
+      setMode(state.resetToken ? "reset" : state.mode);
+    });
+  }
+
+  function submitRecovery(email) {
+    return api("/api/humans/password/forgot", {
+      method: "POST",
+      body: { email: email }
+    }).then(function (data) {
+      authSuccess(data.message || "如果该邮箱已注册，重置邮件会在几分钟内送达。");
+    });
+  }
+
+  function submitReset(password) {
+    return api("/api/humans/password/reset", {
+      method: "POST",
+      body: { token: state.resetToken, password: password }
+    }).then(function (data) {
+      state.resetToken = "";
+      var clean = new URL(location.href);
+      clean.searchParams.delete("reset");
+      history.replaceState(null, "", clean.pathname + clean.search + "#account");
+      $("#auth-form").reset();
+      setMode("login");
+      authSuccess(data.message || "密码已更新，请使用新密码登录。");
+    });
+  }
+
+  function verifyEmailToken() {
+    if (!state.verifyToken) return Promise.resolve(false);
+    return api("/api/humans/email/verify", {
+      method: "POST",
+      body: { token: state.verifyToken }
+    }).then(function (data) {
+      state.verifyToken = "";
+      var clean = new URL(location.href);
+      clean.searchParams.delete("verify");
+      history.replaceState(null, "", clean.pathname + clean.search + "#account");
+      state.user = data.user;
+      state.csrf = data.csrf;
+      enterDeck();
+      return true;
+    }).catch(function (err) {
+      setMode("login");
+      authError(err.message || "验证链接无效或已过期，请重新发送。");
+      return false;
+    });
   }
 
   function initAuth() {
@@ -162,21 +268,62 @@
       if (b) setMode(b.dataset.mode);
     });
     window.addEventListener("resize", moveAuthPill);
-    setMode("login");
+    $("#auth-forgot").addEventListener("click", function () { setMode("forgot"); });
+    $("#auth-back-login").addEventListener("click", function () {
+      state.resetToken = "";
+      setMode("login");
+    });
+    $("#auth-resend").addEventListener("click", function () {
+      var email = state.verificationEmail || $("#auth-email").value.trim();
+      if (!email || state.busy) return;
+      state.busy = true;
+      api("/api/humans/email/resend", { method: "POST", body: { email: email } })
+        .then(function (data) { authSuccess(data.message || "验证邮件已重新发送。"); })
+        .catch(function (err) { authError(err.message || "验证邮件暂时无法发送。"); })
+        .finally(function () { state.busy = false; });
+    });
+    $("#auth-password-toggle").addEventListener("click", function () {
+      var show = $("#auth-password").type === "password";
+      $("#auth-password").type = show ? "text" : "password";
+      $("#auth-confirm").type = show ? "text" : "password";
+      this.textContent = show ? "隐藏" : "显示";
+      this.setAttribute("aria-pressed", String(show));
+    });
+    setMode(state.resetToken ? "reset" : "login");
 
     $("#auth-form").addEventListener("submit", function (e) {
       e.preventDefault();
       if (state.busy) return;
       var email = $("#auth-email").value.trim();
       var password = $("#auth-password").value;
-      if (!email || !password) { authError("请填写邮箱与密码。"); return; }
-      if (state.mode === "register" && password.length < 8) { authError("密码至少 8 个字符。"); return; }
+      var confirm = $("#auth-confirm").value;
+      if (state.mode === "forgot" && !email) { authError("请填写注册邮箱。"); return; }
+      if (state.mode !== "forgot" && !password) { authError("请填写密码。"); return; }
+      if (["login", "register"].indexOf(state.mode) !== -1 && !email) { authError("请填写邮箱与密码。"); return; }
+      if (["register", "reset"].indexOf(state.mode) !== -1 && password.length < 8) { authError("密码至少 8 个字符。"); return; }
+      if (["register", "reset"].indexOf(state.mode) !== -1 && password !== confirm) { authError("两次输入的密码不一致，请重新确认。"); return; }
       state.busy = true;
       authError(null);
       $("#auth-submit-text").textContent = "核验中…";
-      var path = state.mode === "login" ? "/api/humans/login" : "/api/humans/register";
-      api(path, { method: "POST", body: { email: email, password: password } })
+      var request = state.mode === "forgot"
+        ? submitRecovery(email)
+        : state.mode === "reset"
+          ? submitReset(password)
+          : api(state.mode === "login" ? "/api/humans/login" : "/api/humans/register", {
+              method: "POST", body: { email: email, password: password }
+            });
+      request
         .then(function (data) {
+          if (state.mode === "forgot" || state.mode === "reset" || !data) return;
+          if (data.requiresEmailVerification) {
+            state.verificationEmail = email;
+            $("#auth-form").reset();
+            setMode("login");
+            $("#auth-email").value = email;
+            authSuccess(data.message || "验证邮件已发送，请打开邮件完成注册。");
+            $("#auth-resend").hidden = false;
+            return;
+          }
           state.user = data.user;
           state.csrf = data.csrf;
           enterDeck();
@@ -184,10 +331,17 @@
         })
         .catch(function (err) {
           authError(err.message || "核验失败，请重试。");
+          if ((err.code === "EMAIL_NOT_VERIFIED" || err.code === "VERIFICATION_DELIVERY_FAILED")
+            && state.emailVerificationEnabled === true) {
+            state.verificationEmail = email;
+            $("#auth-resend").hidden = false;
+          }
         })
         .finally(function () {
           state.busy = false;
-          $("#auth-submit-text").textContent = state.mode === "login" ? "核验并入席" : "申请观察席位";
+          if (state.mode === "forgot") $("#auth-submit-text").textContent = "发送重置邮件";
+          else if (state.mode === "reset") $("#auth-submit-text").textContent = "更新密码";
+          else $("#auth-submit-text").textContent = state.mode === "login" ? "核验并入席" : "申请观察席位";
         });
     });
   }
@@ -678,6 +832,9 @@
           state.csrf = null;
           state.agents = [];
           state.spirits = null;
+          state.verificationEmail = "";
+          $("#auth-form").reset();
+          setMode("login");
           show("auth");
           moveAuthPill();
         });
@@ -712,17 +869,28 @@
 
   /* ── 启动 ───────────────────────────────────────────── */
   function boot() {
+    var params = new URL(location.href).searchParams;
+    var reset = params.get("reset") || "";
+    var verify = params.get("verify") || "";
+    state.resetToken = /^[A-Za-z0-9_-]{40,256}$/.test(reset) ? reset : "";
+    state.verifyToken = /^[A-Za-z0-9_-]{40,256}$/.test(verify) ? verify : "";
     initAuth();
     initLogout();
     initCursor();
     $("#spirit-open-button").addEventListener("click", openSpiritBox);
-    api("/api/me").then(function (data) {
-      state.user = data.user;
-      state.csrf = data.csrf;
-      enterDeck();
-    }).catch(function () {
-      show("auth");
-      moveAuthPill();
+    loadCapabilities().then(function () {
+      return verifyEmailToken();
+    }).then(function (verified) {
+      if (verified) return;
+      return api("/api/session").then(function (data) {
+        if (!data.user) throw new Error("GUEST_SESSION");
+        state.user = data.user;
+        state.csrf = data.csrf;
+        enterDeck();
+      }).catch(function () {
+        show("auth");
+        setMode(state.resetToken ? "reset" : "login");
+      });
     });
   }
 
