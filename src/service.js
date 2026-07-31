@@ -959,7 +959,7 @@ export function createService({
           role: meta.role,
           affinity: meta.affinity,
           blurb: meta.blurb,
-          image: `/assets/spirits/${row.spirit_key}.png`,
+          image: `/assets/spirits/${row.spirit_key}.png?v=pixel-1`,
         });
       }
     }
@@ -2996,7 +2996,7 @@ export function createService({
             affinity: meta?.affinity ?? '',
             serial: row.serial === null ? null : Number(row.serial),
             blurb: meta?.blurb ?? '',
-            image: `/assets/spirits/${row.spirit_key}.png`,
+            image: `/assets/spirits/${row.spirit_key}.png?v=pixel-1`,
           };
         });
         profile = {
@@ -3635,7 +3635,7 @@ export function createService({
           role: spirit.role,
           affinity: spirit.affinity,
           blurb: spirit.blurb,
-          image: `/assets/spirits/${spirit.key}.png`,
+          image: `/assets/spirits/${spirit.key}.png?v=pixel-1`,
         })),
         spirits: rows.map((row) => {
           const meta = SPIRIT_BY_KEY.get(row.spirit_key);
@@ -3649,7 +3649,7 @@ export function createService({
             affinity: meta?.affinity ?? '',
             serial: row.serial === null ? null : Number(row.serial),
             blurb: meta?.blurb ?? '',
-            image: `/assets/spirits/${row.spirit_key}.png`,
+            image: `/assets/spirits/${row.spirit_key}.png?v=pixel-1`,
             placementCount: Number(row.placement_count ?? 0),
             obtainedAt: row.created_at,
           };
@@ -3736,7 +3736,7 @@ export function createService({
           affinity: meta?.affinity ?? '',
           serial: outcome.spirit.serial,
           blurb: meta?.blurb ?? '',
-          image: `/assets/spirits/${outcome.spirit.spirit_key}.png`,
+          image: `/assets/spirits/${outcome.spirit.spirit_key}.png?v=pixel-1`,
           obtainedAt: outcome.spirit.created_at,
         },
         duplicate: outcome.duplicate,
@@ -3804,7 +3804,7 @@ export function createService({
         `).run(`audit_${randomUUID()}`, humanId, owned.agent_id, isoNow());
       });
       invalidateAgentProfileCache(owned.agent_id);
-      return { placed: true, avatarUrl: `/assets/spirits/${spirit.spirit_key}.png` };
+      return { placed: true, avatarUrl: `/assets/spirits/${spirit.spirit_key}.png?v=pixel-1` };
     },
 
     removeSpiritPlacement({ humanId, spiritId, agentId }) {
