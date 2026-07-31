@@ -155,9 +155,19 @@ export function getClientAddress(request, trustProxy = false) {
     ? trustProxy(peerAddress) === true
     : trustProxy === true;
   if (!peerIsTrusted) return peerAddress;
-  const header = request.headers?.['x-real-ip'];
-  if (Array.isArray(header)) return peerAddress;
-  return validIpAddress(header) ?? peerAddress;
+  for (const name of ['cf-connecting-ip', 'x-real-ip']) {
+    const header = request.headers?.[name];
+    if (Array.isArray(header)) continue;
+    const address = validIpAddress(header);
+    if (address) return address;
+  }
+  return peerAddress;
+}
+
+function rateLimitIdentity(value) {
+  if (typeof value !== 'string') return 'invalid';
+  const normalized = value.trim().toLowerCase();
+  return normalized && normalized.length <= 254 ? normalized : 'invalid';
 }
 
 function createLimiter() {
@@ -450,9 +460,17 @@ export function createHttpHandler({
 
       if (request.method === 'POST' && pathname === '/api/humans/login') {
         requireSameOrigin(request);
-        limit(`login:${clientAddress}`, 5, 10 * 60 * 1000);
+        limit(`login-network:${clientAddress}`, 40, 10 * 60 * 1000);
         const body = await readJson(request);
-        const user = service.authenticateHuman(body);
+        let user;
+        try {
+          user = service.authenticateHuman(body);
+        } catch (error) {
+          if (error instanceof ServiceError && error.code === 'INVALID_CREDENTIALS') {
+            limit(`login-identity:${clientAddress}:${rateLimitIdentity(body.email)}`, 8, 10 * 60 * 1000);
+          }
+          throw error;
+        }
         const session = service.createSession(user.id);
         writeJson(response, 200, { user, csrf: session.csrfToken }, {
           'set-cookie': setSessionCookie(session.token),
@@ -462,11 +480,12 @@ export function createHttpHandler({
 
       if (request.method === 'POST' && pathname === '/api/humans/password/forgot') {
         requireSameOrigin(request);
-        limit(`password-forgot:${clientAddress}`, 4, 15 * 60 * 1000);
+        limit(`password-forgot-network:${clientAddress}`, 20, 15 * 60 * 1000);
         if (typeof passwordResetNotifier !== 'function') {
           throw new ServiceError(503, 'PASSWORD_RESET_UNAVAILABLE', '邮件重置服务正在配置中，请稍后再试。');
         }
         const body = await readJson(request);
+        limit(`password-forgot-identity:${clientAddress}:${rateLimitIdentity(body.email)}`, 4, 15 * 60 * 1000);
         const reset = service.createPasswordReset(body);
         if (reset) {
           try {

@@ -180,7 +180,7 @@ test('observer has a clean GET and HEAD static route', async () => {
   assert.equal(await revalidated.text(), '');
 });
 
-test('X-Real-IP is ignored by default and accepted only from a configured trusted proxy', () => {
+test('proxy client IP headers are ignored by default and Cloudflare takes precedence when trusted', () => {
   const request = {
     headers: { 'x-real-ip': '203.0.113.42' },
     socket: { remoteAddress: '10.0.0.8' },
@@ -190,7 +190,13 @@ test('X-Real-IP is ignored by default and accepted only from a configured truste
   assert.equal(getClientAddress(request, (peer) => peer === '10.0.0.8'), '203.0.113.42');
   assert.equal(getClientAddress(request, () => false), '10.0.0.8');
 
+  request.headers['cf-connecting-ip'] = '198.51.100.24';
+  assert.equal(getClientAddress(request), '10.0.0.8');
+  assert.equal(getClientAddress(request, true), '198.51.100.24');
+
   request.headers['x-real-ip'] = '203.0.113.42, 198.51.100.2';
+  assert.equal(getClientAddress(request, true), '198.51.100.24');
+  delete request.headers['cf-connecting-ip'];
   assert.equal(getClientAddress(request, true), '10.0.0.8');
   request.headers['x-real-ip'] = 'not-an-ip';
   assert.equal(getClientAddress(request, true), '10.0.0.8');

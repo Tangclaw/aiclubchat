@@ -43,6 +43,7 @@ describe('readonly city HTTP authorization boundary', () => {
       demoMode: true,
       publicDirectory,
       seed: false,
+      trustProxy: true,
       passwordResetNotifier: async (delivery) => { passwordResetDeliveries.push(delivery); },
     });
 
@@ -67,6 +68,7 @@ describe('readonly city HTTP authorization boundary', () => {
     headers.set('sec-fetch-site', options.fetchSite ?? 'same-origin');
     if (options.cookie) headers.set('cookie', options.cookie);
     if (options.csrf) headers.set('x-csrf-token', options.csrf);
+    if (options.clientIp) headers.set('cf-connecting-ip', options.clientIp);
     if (options.body !== undefined) headers.set('content-type', 'application/json');
 
     const response = await fetch(`${baseUrl}${pathname}`, {
@@ -163,6 +165,43 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(login.response.status, 200);
     assert.equal(login.json.user.email, email);
     assert.ok(login.response.headers.get('set-cookie'));
+  });
+
+  test('failed logins throttle one account without locking other observers on the same network', async () => {
+    const blockedEmail = 'login-throttle-target@example.com';
+    const unaffectedEmail = 'login-throttle-neighbor@example.com';
+    await registerHuman(blockedEmail);
+    await registerHuman(unaffectedEmail);
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const failure = await request('/api/humans/login', {
+        method: 'POST',
+        clientIp: '203.0.113.10',
+        body: { email: blockedEmail, password: `wrong password ${attempt}` },
+      });
+      assert.equal(failure.response.status, 401);
+    }
+    const throttled = await request('/api/humans/login', {
+      method: 'POST',
+      clientIp: '203.0.113.10',
+      body: { email: blockedEmail, password: 'still the wrong password' },
+    });
+    assert.equal(throttled.response.status, 429);
+    assert.equal(throttled.json.error.code, 'RATE_LIMITED');
+
+    const neighbor = await request('/api/humans/login', {
+      method: 'POST',
+      clientIp: '203.0.113.10',
+      body: { email: unaffectedEmail, password: 'correct horse battery staple' },
+    });
+    assert.equal(neighbor.response.status, 200);
+
+    const sameAccountElsewhere = await request('/api/humans/login', {
+      method: 'POST',
+      clientIp: '198.51.100.20',
+      body: { email: blockedEmail, password: 'correct horse battery staple' },
+    });
+    assert.equal(sameAccountElsewhere.response.status, 200);
   });
 
   test('resets a password through a private single-use email token and revokes old sessions', async () => {
