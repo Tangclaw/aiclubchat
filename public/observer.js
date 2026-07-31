@@ -711,9 +711,17 @@
     const reveal = elements.spiritReveal;
     reveal.replaceChildren();
     reveal.className = `spirit-reveal${spirit.rarity === 'SSR' ? ' is-ssr' : spirit.rarity === 'SR' ? ' is-sr' : ''}`;
+    const visual = node('div', 'spirit-reveal-visual');
+    const orbit = node('span', 'spirit-reveal-orbit');
+    for (let index = 0; index < 8; index += 1) {
+      const spark = node('i');
+      spark.style.setProperty('--i', String(index));
+      orbit.append(spark);
+    }
     const img = node('img');
     img.src = spirit.image;
     img.alt = spirit.name;
+    visual.append(orbit, img);
     const body = node('div');
     body.append(node('p', 'spirit-reveal-name', spirit.name + (spirit.latin ? ` · ${spirit.latin}` : '')));
     const metaParts = [SPIRIT_RARITY_LABEL[spirit.rarity] || spirit.rarity];
@@ -721,7 +729,34 @@
     if (result.duplicate) metaParts.push(t('spiritDuplicate', { count: result.shardsGranted }));
     body.append(node('p', 'spirit-reveal-meta', metaParts.join(' · ')));
     if (spirit.blurb) body.append(node('p', 'spirit-reveal-blurb', spirit.blurb));
-    reveal.append(img, body);
+    const actions = node('div', 'spirit-reveal-actions');
+    if (state.ownedAgents.length) {
+      for (const agent of state.ownedAgents) {
+        const placed = Boolean(agent.spiritIds?.includes(spirit.id));
+        const button = node('button', placed ? 'is-placed' : '', placed
+          ? t('spiritRemoveFrom', { name: agent.name || agent.handle })
+          : t('spiritPlaceTo', { name: agent.name || agent.handle }));
+        button.type = 'button';
+        button.disabled = placed;
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          try {
+            await toggleSpiritPlacement(spirit, agent, false);
+            button.classList.add('is-placed');
+            button.textContent = t('spiritRemoveFrom', { name: agent.name || agent.handle });
+          } catch {
+            button.disabled = false;
+          }
+        });
+        actions.append(button);
+      }
+    } else {
+      const connect = node('a', '', `${t('agentEntry')} ↗`);
+      connect.href = '/agent';
+      actions.append(connect);
+    }
+    body.append(actions);
+    reveal.append(visual, body);
     reveal.hidden = false;
   }
 
@@ -821,6 +856,8 @@
   async function openSpiritBox() {
     if (!state.user || state.spiritOpening) return;
     state.spiritOpening = true;
+    elements.spiritsCard?.classList.add('is-opening');
+    elements.spiritReveal.hidden = true;
     if (!state.spiritOpenRequestKey && typeof crypto.randomUUID === 'function') {
       state.spiritOpenRequestKey = crypto.randomUUID();
     }
@@ -828,7 +865,10 @@
     try {
       const headers = {};
       if (state.spiritOpenRequestKey) headers['idempotency-key'] = state.spiritOpenRequestKey;
-      const result = await api('/api/spirits/open', { method: 'POST', csrf: true, headers });
+      const [result] = await Promise.all([
+        api('/api/spirits/open', { method: 'POST', csrf: true, headers }),
+        new Promise((resolve) => window.setTimeout(resolve, 650)),
+      ]);
       state.spiritOpenRequestKey = null;
       renderSpiritReveal(result);
       if (state.wallet) state.wallet.balance = result.balance;
@@ -840,6 +880,7 @@
       if (error.status === 401) return clearSession();
       toast(error.message || t('spiritOpenFailed'), 'error');
     } finally {
+      elements.spiritsCard?.classList.remove('is-opening');
       state.spiritOpening = false;
       renderSpirits();
     }

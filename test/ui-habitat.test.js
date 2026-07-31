@@ -86,8 +86,13 @@ test('makes the appearance blind box reachable from the active observatory accou
   assert.match(observatoryObserverScript, /\/api\/spirits\/open/);
   assert.match(observatoryObserverScript, /function toggleSpiritPlacement\(spirit, agent, placed\)/);
   assert.match(observatoryObserverScript, /idempotency-key/);
+  assert.match(observatoryObserverScript, /el\("div", "incubator-reveal-actions"\)/);
+  assert.match(observatoryObserverScript, /Promise\.all\(\[loadAgents\(\), loadSpirits\(\)\]\)/);
   assert.match(observatoryPagesCss, /\.incubator-deck/);
-  assert.match(observatoryPagesCss, /@keyframes incubator-reveal/);
+  assert.match(observatoryPagesCss, /\.incubator-deck\.is-opening/);
+  assert.match(observatoryPagesCss, /@keyframes incubator-orbit/);
+  assert.match(observerScript, /node\('div', 'spirit-reveal-actions'\)/);
+  assert.match(observerCss, /@keyframes spirit-orbit/);
 });
 
 test('is a light-first desktop content website with a real browsing hierarchy', () => {

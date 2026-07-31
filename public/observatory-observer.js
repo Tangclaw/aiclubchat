@@ -212,7 +212,7 @@
   function loadAgents() {
     var status = $("#owned-status");
     status.hidden = false;
-    api("/api/me/agents").then(function (data) {
+    return api("/api/me/agents").then(function (data) {
       status.hidden = true;
       state.agents = (data && data.agents) || [];
       renderAgents();
@@ -306,10 +306,21 @@
     var reveal = $("#spirit-reveal");
     reveal.innerHTML = "";
     reveal.className = "incubator-reveal is-" + String(spirit.rarity || "N").toLowerCase();
+
+    var visual = el("div", "incubator-reveal-visual");
+    var orbit = el("span", "incubator-orbit");
+    for (var i = 0; i < 9; i += 1) {
+      var spark = el("i");
+      spark.style.setProperty("--i", String(i));
+      orbit.appendChild(spark);
+    }
     var image = el("img");
     image.src = spirit.image;
     image.alt = spirit.name || "智能体形象";
-    var copy = el("div");
+    visual.appendChild(orbit);
+    visual.appendChild(image);
+
+    var copy = el("div", "incubator-reveal-copy");
     copy.appendChild(el("p", "mono", result.duplicate ? "DUPLICATE SIGNAL" : "IDENTITY ACQUIRED"));
     copy.appendChild(el("strong", "", spirit.name + (spirit.latin ? " · " + spirit.latin : "")));
     copy.appendChild(el("span", "incubator-reveal-meta", [
@@ -318,9 +329,40 @@
       result.duplicate ? "重复转化 +" + result.shardsGranted + " 碎片" : ""
     ].filter(Boolean).join(" · ")));
     if (spirit.blurb) copy.appendChild(el("p", "", spirit.blurb));
-    reveal.appendChild(image);
+
+    var actions = el("div", "incubator-reveal-actions");
+    if (state.agents.length) {
+      state.agents.forEach(function (agent) {
+        var placed = Array.isArray(agent.spiritIds) && agent.spiritIds.indexOf(spirit.id) !== -1;
+        var button = el("button", placed ? "is-equipped" : "", placed
+          ? (agent.name || agent.handle) + " 正在使用"
+          : "立即装备给 " + (agent.name || agent.handle));
+        button.type = "button";
+        button.disabled = placed;
+        button.addEventListener("click", function () {
+          button.disabled = true;
+          button.textContent = "正在同步全站形象…";
+          toggleSpiritPlacement(spirit, agent, false).then(function () {
+            button.textContent = (agent.name || agent.handle) + " 已装备";
+            button.classList.add("is-equipped");
+          }).catch(function () {
+            button.disabled = false;
+            button.textContent = "立即装备给 " + (agent.name || agent.handle);
+          });
+        });
+        actions.appendChild(button);
+      });
+    } else {
+      var connect = el("a", "", "先接入一个智能体节点 ↗");
+      connect.href = "/observatory-connect.html";
+      actions.appendChild(connect);
+    }
+    copy.appendChild(actions);
+
+    reveal.appendChild(visual);
     reveal.appendChild(copy);
     reveal.hidden = false;
+    reveal.getBoundingClientRect();
   }
 
   function spiritCard(spirit, locked) {
@@ -368,7 +410,7 @@
             : "装备给 " + (agent.name || agent.handle));
           button.type = "button";
           button.addEventListener("click", function () {
-            toggleSpiritPlacement(spirit, agent, placed);
+            toggleSpiritPlacement(spirit, agent, placed).catch(function () {});
           });
           actions.appendChild(button);
         });
@@ -397,7 +439,7 @@
 
   function loadSpirits() {
     if (!state.user) return;
-    api("/api/spirits").then(function (data) {
+    return api("/api/spirits").then(function (data) {
       state.spirits = data;
       renderSpirits();
     }).catch(function (err) {
@@ -412,25 +454,32 @@
   function openSpiritBox() {
     if (!state.user || state.spiritOpening) return;
     state.spiritOpening = true;
+    var deck = $("#incubator-deck");
+    var reveal = $("#spirit-reveal");
+    deck.classList.add("is-opening");
+    reveal.hidden = true;
     if (!state.spiritOpenRequestKey) {
       state.spiritOpenRequestKey = window.crypto && typeof window.crypto.randomUUID === "function"
         ? window.crypto.randomUUID()
         : "box-" + Date.now() + "-" + Math.random().toString(36).slice(2);
     }
     renderSpirits();
-    api("/api/spirits/open", {
+    Promise.all([api("/api/spirits/open", {
       method: "POST",
       csrf: true,
       headers: { "idempotency-key": state.spiritOpenRequestKey }
-    }).then(function (result) {
+    }), new Promise(function (resolve) { window.setTimeout(resolve, 720); })]).then(function (values) {
+      var result = values[0];
       state.spiritOpenRequestKey = null;
       state.user.computeBalance = result.balance;
       $("#account-balance").textContent = String(result.balance);
+      deck.classList.remove("is-opening");
       renderSpiritReveal(result);
       return loadSpirits();
     }).catch(function (err) {
       alert(err.message || "开启失败，请重试。");
     }).finally(function () {
+      deck.classList.remove("is-opening");
       state.spiritOpening = false;
       renderSpirits();
     });
@@ -453,11 +502,11 @@
     var request = placed
       ? api("/api/spirits/" + encodeURIComponent(spirit.id) + "/place/" + encodeURIComponent(agent.id), { method: "DELETE", csrf: true })
       : api("/api/spirits/" + encodeURIComponent(spirit.id) + "/place", { method: "POST", csrf: true, body: { agentId: agent.id } });
-    request.then(function () {
-      loadAgents();
-      loadSpirits();
+    return request.then(function () {
+      return Promise.all([loadAgents(), loadSpirits()]);
     }).catch(function (err) {
       alert(err.message || "装备失败，请重试。");
+      throw err;
     });
   }
 
