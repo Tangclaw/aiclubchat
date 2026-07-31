@@ -14,6 +14,7 @@ export function migrate(database) {
     CREATE TABLE IF NOT EXISTS humans (
       id TEXT PRIMARY KEY,
       email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      email_verified_at TEXT,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'human' CHECK (role = 'human'),
       membership TEXT NOT NULL DEFAULT 'free' CHECK (membership IN ('free', 'member')),
@@ -135,6 +136,14 @@ export function migrate(database) {
       used_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS email_verification_tokens (
+      token_hash TEXT PRIMARY KEY,
+      human_id TEXT NOT NULL REFERENCES humans(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS posts (
       id TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
@@ -242,6 +251,8 @@ export function migrate(database) {
       ON sessions(human_id, expires_at);
     CREATE INDEX IF NOT EXISTS password_reset_tokens_human_idx
       ON password_reset_tokens(human_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS email_verification_tokens_human_idx
+      ON email_verification_tokens(human_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS agent_keys_agent_idx
       ON agent_keys(agent_id);
     CREATE INDEX IF NOT EXISTS agent_keys_current_activity_idx
@@ -425,6 +436,13 @@ export function migrate(database) {
     CREATE INDEX IF NOT EXISTS spirit_placements_agent_idx ON spirit_placements(agent_id);
   `);
   const humanColumns = database.prepare('PRAGMA table_info(humans)').all();
+  if (!humanColumns.some((column) => column.name === 'email_verified_at')) {
+    database.exec('ALTER TABLE humans ADD COLUMN email_verified_at TEXT');
+    // Accounts that existed before verification was introduced must not be
+    // locked out during deployment. Only newly registered accounts can start
+    // unverified.
+    database.exec('UPDATE humans SET email_verified_at = created_at WHERE email_verified_at IS NULL');
+  }
   if (!humanColumns.some((column) => column.name === 'compute_balance')) {
     database.exec('ALTER TABLE humans ADD COLUMN compute_balance INTEGER NOT NULL DEFAULT 100 CHECK (compute_balance >= 0)');
   }

@@ -15,6 +15,7 @@ import { runInTransaction } from './transaction.js';
 
 const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_LIFETIME_MS = 20 * 60 * 1000;
+const EMAIL_VERIFICATION_LIFETIME_MS = 30 * 60 * 1000;
 const MEMBERSHIP_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 const AGENT_KEY_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 const DEFAULT_AGENT_LIMIT = 10;
@@ -346,6 +347,8 @@ function humanFromRow(row, referenceDate = new Date()) {
   return {
     id: row.id,
     email: row.email,
+    emailVerified: Boolean(row.email_verified_at),
+    emailVerifiedAt: row.email_verified_at ?? null,
     role: 'human',
     membership: membershipExpired ? 'free' : row.membership,
     membershipExpiresAt: row.membership_expires_at ?? null,
@@ -1657,7 +1660,7 @@ export function createService({
   }
 
   const service = {
-    registerHuman({ email, password }) {
+    registerHuman({ email, password, emailVerified = true }) {
       const normalizedEmail = normalizeEmail(email);
       validatePassword(password);
       if (db.prepare('SELECT 1 FROM humans WHERE email = ? COLLATE NOCASE').get(normalizedEmail)) {
@@ -1668,11 +1671,12 @@ export function createService({
         email: normalizedEmail,
         passwordHash: hashPassword(password),
         createdAt: isoNow(),
+        emailVerifiedAt: emailVerified ? isoNow() : null,
       };
       db.prepare(`
-        INSERT INTO humans (id, email, password_hash, role, membership, status, created_at)
-        VALUES (?, ?, ?, 'human', 'free', 'active', ?)
-      `).run(row.id, row.email, row.passwordHash, row.createdAt);
+        INSERT INTO humans (id, email, email_verified_at, password_hash, role, membership, status, created_at)
+        VALUES (?, ?, ?, ?, 'human', 'free', 'active', ?)
+      `).run(row.id, row.email, row.emailVerifiedAt, row.passwordHash, row.createdAt);
       return humanFromRow(db.prepare('SELECT * FROM humans WHERE id = ?').get(row.id), now());
     },
 
@@ -1682,7 +1686,62 @@ export function createService({
       if (!row || row.status !== 'active' || !verifyPassword(String(password ?? ''), row.password_hash)) {
         fail(401, 'INVALID_CREDENTIALS', '邮箱或密码不正确。');
       }
+      if (!row.email_verified_at) {
+        fail(403, 'EMAIL_NOT_VERIFIED', '请先打开注册邮件完成邮箱验证。', {
+          suggestions: ['检查垃圾邮件文件夹', '在登录页重新发送验证邮件'],
+        });
+      }
       return humanFromRow(row, now());
+    },
+
+    createEmailVerification({ humanId, email } = {}) {
+      const human = humanId
+        ? db.prepare("SELECT id, email, email_verified_at FROM humans WHERE id = ? AND status = 'active'").get(humanId)
+        : db.prepare("SELECT id, email, email_verified_at FROM humans WHERE email = ? COLLATE NOCASE AND status = 'active'")
+          .get(normalizeEmail(email));
+      if (!human || human.email_verified_at) return null;
+
+      const token = randomBytes(32).toString('base64url');
+      const createdAt = now();
+      const expiresAt = new Date(createdAt.getTime() + EMAIL_VERIFICATION_LIFETIME_MS);
+      runInTransaction(db, () => {
+        db.prepare('DELETE FROM email_verification_tokens WHERE human_id = ?').run(human.id);
+        db.prepare(`
+          INSERT INTO email_verification_tokens (token_hash, human_id, created_at, expires_at)
+          VALUES (?, ?, ?, ?)
+        `).run(hashToken(token), human.id, createdAt.toISOString(), expiresAt.toISOString());
+      });
+      return { email: human.email, token, expiresAt: expiresAt.toISOString() };
+    },
+
+    verifyHumanEmail({ token }) {
+      if (typeof token !== 'string' || token.length < 32 || token.length > 256) {
+        fail(400, 'INVALID_VERIFICATION_TOKEN', '验证链接无效或已过期，请重新发送。');
+      }
+      const tokenHash = hashToken(token);
+      const verification = db.prepare(`
+        SELECT token_hash, human_id, expires_at, used_at
+        FROM email_verification_tokens WHERE token_hash = ?
+      `).get(tokenHash);
+      if (!verification || verification.used_at || isInvalidOrExpired(verification.expires_at, now())) {
+        fail(400, 'INVALID_VERIFICATION_TOKEN', '验证链接无效或已过期，请重新发送。');
+      }
+
+      const verifiedAt = isoNow();
+      runInTransaction(db, () => {
+        const consumed = db.prepare(`
+          UPDATE email_verification_tokens SET used_at = ?
+          WHERE token_hash = ? AND used_at IS NULL
+        `).run(verifiedAt, tokenHash);
+        if (consumed.changes !== 1) {
+          fail(400, 'INVALID_VERIFICATION_TOKEN', '验证链接无效或已过期，请重新发送。');
+        }
+        db.prepare('UPDATE humans SET email_verified_at = ? WHERE id = ?')
+          .run(verifiedAt, verification.human_id);
+        db.prepare('DELETE FROM email_verification_tokens WHERE human_id = ? AND token_hash <> ?')
+          .run(verification.human_id, tokenHash);
+      });
+      return humanFromRow(db.prepare('SELECT * FROM humans WHERE id = ?').get(verification.human_id), now());
     },
 
     createPasswordReset({ email }) {

@@ -689,6 +689,8 @@
     resetPasswordCopy: '这条安全链接只能使用一次，完成后其他设备会退出登录。', resetPasswordSubmit: '更新密码',
     passwordResetDone: '密码已更新，请使用新密码登录。', confirmPassword: '确认密码',
     passwordRecoveryUnavailable: '邮箱找回正在配置',
+    resendVerification: '重新发送验证邮件', verificationSent: '验证邮件已发送，请打开邮件完成注册。',
+    verificationResent: '如果该邮箱仍待验证，一封新邮件会在几分钟内送达。', emailVerified: '邮箱验证完成，账户已登录。',
     passwordsDoNotMatch: '两次输入的密码不一致。', showPassword: '显示', hidePassword: '隐藏',
   });
   Object.assign(dictionaries.en, {
@@ -698,6 +700,8 @@
     resetPasswordCopy: 'This secure link works once. Other signed-in devices will be signed out.', resetPasswordSubmit: 'Update password',
     passwordResetDone: 'Password updated. Sign in with the new password.', confirmPassword: 'Confirm password',
     passwordRecoveryUnavailable: 'Email recovery is being configured',
+    resendVerification: 'Resend verification email', verificationSent: 'Verification email sent. Open it to finish registration.',
+    verificationResent: 'If the email is still unverified, a new message will arrive shortly.', emailVerified: 'Email verified. You are now signed in.',
     passwordsDoNotMatch: 'The passwords do not match.', showPassword: 'Show', hidePassword: 'Hide',
   });
   Object.assign(dictionaries.ja, {
@@ -707,6 +711,8 @@
     resetPasswordCopy: 'このリンクは一度だけ使用できます。完了すると他の端末はログアウトします。', resetPasswordSubmit: 'パスワードを更新',
     passwordResetDone: 'パスワードを更新しました。新しいパスワードでログインしてください。', confirmPassword: 'パスワード確認',
     passwordRecoveryUnavailable: 'メール復旧機能を設定中です',
+    resendVerification: '確認メールを再送', verificationSent: '確認メールを送信しました。メールを開いて登録を完了してください。',
+    verificationResent: '未確認の場合、新しいメールがまもなく届きます。', emailVerified: 'メール確認が完了し、ログインしました。',
     passwordsDoNotMatch: 'パスワードが一致しません。', showPassword: '表示', hidePassword: '非表示',
   });
 

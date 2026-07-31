@@ -279,6 +279,7 @@ export function createHttpHandler({
   readinessCheck = () => true,
   trustProxy = false,
   passwordResetNotifier = null,
+  emailVerificationNotifier = null,
 }) {
   const cookieName = secureCookies ? '__Host-rc_session' : 'rc_session';
   const limit = createLimiter();
@@ -365,6 +366,7 @@ export function createHttpHandler({
         writeJson(response, 200, {
           agentRegistrationEnabled,
           passwordResetEnabled: typeof passwordResetNotifier === 'function',
+          emailVerificationEnabled: typeof emailVerificationNotifier === 'function',
           platform: 'AIClub',
           baseUrl: origin,
           docsUrl: `${origin}/docs`,
@@ -450,10 +452,74 @@ export function createHttpHandler({
         requireSameOrigin(request);
         limit(`register:${clientAddress}`, 5, 10 * 60 * 1000);
         const body = await readJson(request);
-        const user = service.registerHuman(body);
+        const requiresEmailVerification = typeof emailVerificationNotifier === 'function';
+        const user = service.registerHuman({ ...body, emailVerified: !requiresEmailVerification });
+        if (requiresEmailVerification) {
+          const verification = service.createEmailVerification({ humanId: user.id });
+          try {
+            await emailVerificationNotifier(verification);
+          } catch (error) {
+            console.error(JSON.stringify({
+              event: 'email.verification.delivery_failed',
+              message: error instanceof Error ? error.message : String(error),
+            }));
+            throw new ServiceError(
+              503,
+              'VERIFICATION_DELIVERY_FAILED',
+              '账户已创建，但验证邮件暂时无法送达。请稍后重新发送验证邮件。',
+            );
+          }
+          writeJson(response, 202, {
+            requiresEmailVerification: true,
+            message: '验证邮件已发送，请打开邮件完成注册。',
+          }, { 'cache-control': 'no-store' });
+          return;
+        }
         const session = service.createSession(user.id);
         writeJson(response, 201, { user, csrf: session.csrfToken }, {
           'set-cookie': setSessionCookie(session.token),
+        });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/humans/email/resend') {
+        requireSameOrigin(request);
+        limit(`email-verification-network:${clientAddress}`, 20, 15 * 60 * 1000);
+        if (typeof emailVerificationNotifier !== 'function') {
+          throw new ServiceError(503, 'EMAIL_VERIFICATION_UNAVAILABLE', '邮箱验证服务正在配置中，请稍后再试。');
+        }
+        const body = await readJson(request);
+        limit(`email-verification-identity:${clientAddress}:${rateLimitIdentity(body.email)}`, 4, 15 * 60 * 1000);
+        const verification = service.createEmailVerification({ email: body.email });
+        if (verification) {
+          try {
+            await emailVerificationNotifier(verification);
+          } catch (error) {
+            console.error(JSON.stringify({
+              event: 'email.verification.delivery_failed',
+              message: error instanceof Error ? error.message : String(error),
+            }));
+          }
+        }
+        writeJson(response, 202, {
+          message: '如果该邮箱仍待验证，一封新邮件会在几分钟内送达。',
+        });
+        return;
+      }
+
+      if (request.method === 'POST' && pathname === '/api/humans/email/verify') {
+        requireSameOrigin(request);
+        limit(`email-verify:${clientAddress}`, 12, 15 * 60 * 1000);
+        const body = await readJson(request);
+        const user = service.verifyHumanEmail(body);
+        const session = service.createSession(user.id);
+        writeJson(response, 200, {
+          user,
+          csrf: session.csrfToken,
+          message: '邮箱验证完成，账户已登录。',
+        }, {
+          'set-cookie': setSessionCookie(session.token),
+          'cache-control': 'no-store',
         });
         return;
       }

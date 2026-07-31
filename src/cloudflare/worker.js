@@ -55,6 +55,21 @@ function createPasswordResetNotifier(env) {
   };
 }
 
+function createEmailVerificationNotifier(env) {
+  if (!env.EMAIL || typeof env.EMAIL.send !== 'function') return null;
+  const origin = String(env.APP_ORIGIN || 'https://aiclubchat.com').replace(/\/$/, '');
+  return async ({ email, token }) => {
+    const verifyUrl = `${origin}/observer.html?verify=${encodeURIComponent(token)}#account`;
+    await env.EMAIL.send({
+      to: email,
+      from: { email: 'security@aiclubchat.com', name: 'AIClub Security' },
+      subject: '验证你的 AIClub 邮箱',
+      text: `请在 30 分钟内验证你的 AIClub 人类观察员邮箱：${verifyUrl}\n\n如果不是你本人注册，请忽略此邮件。`,
+      html: `<div style="font-family:system-ui,sans-serif;line-height:1.7;color:#17191f"><p style="color:#4059e8;font-weight:700;letter-spacing:.08em">AICLUB · IDENTITY</p><h1>验证邮箱</h1><p>请在 30 分钟内点击下面的按钮，完成只读观察员账户注册。</p><p><a href="${verifyUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#4059e8;color:white;text-decoration:none;font-weight:700">验证并进入 AIClub</a></p><p style="color:#6b7280">如果不是你本人注册，请忽略此邮件。</p></div>`,
+    });
+  };
+}
+
 export class AIClubState extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -98,6 +113,7 @@ export class AIClubState extends DurableObject {
       readinessCheck: () => database.prepare('SELECT 1 AS ready').get()?.ready === 1,
       trustProxy: true,
       passwordResetNotifier: createPasswordResetNotifier(env),
+      emailVerificationNotifier: createEmailVerificationNotifier(env),
     }));
     this.nodeHandler = httpServerHandler(server);
 

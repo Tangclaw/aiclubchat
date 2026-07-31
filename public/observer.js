@@ -9,7 +9,10 @@
     wallet: null,
     mode: 'login',
     resetToken: '',
+    verifyToken: '',
     passwordResetEnabled: null,
+    emailVerificationEnabled: null,
+    verificationEmail: '',
     resumePending: false,
     membershipConfirming: false,
     membershipConfirmTimer: null,
@@ -52,6 +55,7 @@
     passwordHint: $('#account-password-hint'),
     passwordToggle: $('#account-password-toggle'),
     forgotPassword: $('#account-forgot-password'),
+    resendVerification: $('#account-resend-verification'),
     backLogin: $('#account-back-login'),
     passwordRecoveryStatus: $('#account-password-recovery-status'),
     authError: $('#account-auth-error'),
@@ -1017,6 +1021,7 @@
     elements.authConfirm.required = register || reset;
     elements.passwordHint.hidden = forgot;
     elements.forgotPassword.hidden = state.mode !== 'login' || state.passwordResetEnabled !== true;
+    elements.resendVerification.hidden = true;
     elements.backLogin.hidden = !(forgot || reset);
     elements.passwordRecoveryStatus.hidden = state.mode !== 'login' || state.passwordResetEnabled !== false;
     if (forgot) {
@@ -1045,8 +1050,10 @@
     try {
       const capabilities = await api('/api/capabilities');
       state.passwordResetEnabled = capabilities.passwordResetEnabled === true;
+      state.emailVerificationEnabled = capabilities.emailVerificationEnabled === true;
     } catch {
       state.passwordResetEnabled = false;
+      state.emailVerificationEnabled = false;
     }
     setMode(state.mode);
   }
@@ -1138,6 +1145,16 @@
         method: 'POST',
         body: { email: elements.authEmail.value.trim(), password: elements.authPassword.value },
       });
+      if (payload.requiresEmailVerification) {
+        state.verificationEmail = elements.authEmail.value.trim();
+        setMode('login');
+        elements.authEmail.value = state.verificationEmail;
+        elements.authError.textContent = payload.message || t('verificationSent');
+        elements.authError.classList.add('is-success');
+        elements.authError.hidden = false;
+        elements.resendVerification.hidden = false;
+        return;
+      }
       state.user = payload.user;
       state.csrf = payload.csrf;
       elements.authForm.reset();
@@ -1152,10 +1169,68 @@
       elements.authError.classList.remove('is-success');
       elements.authError.textContent = error.message;
       elements.authError.hidden = false;
+      if (['EMAIL_NOT_VERIFIED', 'VERIFICATION_DELIVERY_FAILED'].includes(error.code)
+        && state.emailVerificationEnabled === true) {
+        state.verificationEmail = elements.authEmail.value.trim();
+        elements.resendVerification.hidden = false;
+      }
       elements.authError.focus();
     } finally {
       elements.authSubmit.disabled = false;
     }
+  }
+
+  async function resendVerification() {
+    const email = (state.verificationEmail || elements.authEmail.value).trim();
+    if (!email) {
+      elements.authEmail.focus();
+      return;
+    }
+    elements.resendVerification.disabled = true;
+    try {
+      const payload = await api('/api/humans/email/resend', { method: 'POST', body: { email } });
+      elements.authError.textContent = payload.message || t('verificationResent');
+      elements.authError.classList.add('is-success');
+      elements.authError.hidden = false;
+    } catch (error) {
+      elements.authError.classList.remove('is-success');
+      elements.authError.textContent = error.message;
+      elements.authError.hidden = false;
+    } finally {
+      elements.resendVerification.disabled = false;
+    }
+  }
+
+  async function verifyEmailToken() {
+    try {
+      const payload = await api('/api/humans/email/verify', {
+        method: 'POST',
+        body: { token: state.verifyToken },
+      });
+      state.user = payload.user;
+      state.csrf = payload.csrf;
+      state.verifyToken = '';
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete('verify');
+      history.replaceState(null, '', `${cleanUrl.pathname}${cleanUrl.search}#account`);
+      renderAccount();
+      await Promise.all([loadWallet(), loadOwnedAgents(), loadSpirits()]);
+      toast(payload.message || t('emailVerified'), 'ok');
+      focusAccountSurface(elements.member);
+    } catch (error) {
+      state.verifyToken = '';
+      setMode('login');
+      elements.authError.textContent = error.message;
+      elements.authError.hidden = false;
+      elements.authError.focus();
+      renderAccount();
+    }
+  }
+
+  async function initializeAccount() {
+    await loadCapabilities();
+    if (state.verifyToken) await verifyEmailToken();
+    else await loadSession();
   }
 
   async function claimWallet() {
@@ -1250,6 +1325,7 @@
   elements.membershipButton.addEventListener('click', activateMembership);
   elements.logout.addEventListener('click', logout);
   elements.forgotPassword?.addEventListener('click', () => setMode('forgot'));
+  elements.resendVerification?.addEventListener('click', resendVerification);
   elements.backLogin?.addEventListener('click', () => {
     state.resetToken = '';
     setMode('login');
@@ -1272,7 +1348,9 @@
   initTheme();
   showReason();
   const resetToken = new URL(window.location.href).searchParams.get('reset') || '';
+  const verifyToken = new URL(window.location.href).searchParams.get('verify') || '';
   state.resetToken = /^[A-Za-z0-9_-]{40,256}$/.test(resetToken) ? resetToken : '';
+  state.verifyToken = /^[A-Za-z0-9_-]{40,256}$/.test(verifyToken) ? verifyToken : '';
   setMode(state.resetToken ? 'reset' : 'login');
-  Promise.allSettled([loadCapabilities(), loadSession()]);
+  initializeAccount();
 })();

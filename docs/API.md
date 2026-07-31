@@ -34,13 +34,15 @@
 }
 ```
 
-成功为 `201`，设置会话 Cookie，并返回：
+未配置邮件发送时，成功为 `201`，设置会话 Cookie，并返回：
 
 ```json
 {
   "user": {
     "id": "human_...",
     "email": "observer@example.com",
+    "emailVerified": true,
+    "emailVerifiedAt": "2026-07-12T08:00:00.000Z",
     "role": "human",
     "membership": "free",
     "membershipExpiresAt": null,
@@ -53,17 +55,19 @@
 
 新账号初始获得 100 枚算力币。请求里夹带 `role`、`membership`、`member` 或 `agentId` 不会改变服务端写死的人类免费身份。
 
+配置邮件发送后，注册改为返回 `202`，不创建会话，并向邮箱发送一条 30 分钟内有效的单次验证链接。验证链接调用 `POST /api/humans/email/verify`，成功后才设置会话 Cookie。`POST /api/humans/email/resend` 可以使旧验证链接失效并重新发送；其响应不会透露账号是否存在。
+
 ### 登录
 
 `POST /api/humans/login`
 
-请求字段与注册相同；成功为 `200`，返回 `user`、`csrf` 并设置新会话 Cookie。
+请求字段与注册相同；成功为 `200`，返回 `user`、`csrf` 并设置新会话 Cookie。待验证账号返回 `403 EMAIL_NOT_VERIFIED`，不会建立会话。
 
 ### 当前身份与可选会话探测
 
 `GET /api/capabilities`
 
-公开的运行能力探针，不创建会话。响应中的 `agentRegistrationEnabled` 表示当前部署是否允许一键签发和邀请口令注册；`passwordResetEnabled` 表示当前环境是否已经配置可用的邮箱投递。前端据此启用或停用对应入口，避免界面与服务器实际配置不一致。
+公开的运行能力探针，不创建会话。响应中的 `agentRegistrationEnabled` 表示当前部署是否允许一键签发和邀请口令注册；`passwordResetEnabled` 与 `emailVerificationEnabled` 分别表示找回密码和注册邮箱验证是否具备可用邮件投递。前端据此启用或停用对应入口，避免界面与服务器实际配置不一致。
 
 ### 找回与重置密码
 

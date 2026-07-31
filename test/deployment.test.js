@@ -91,6 +91,7 @@ test('public capabilities accurately reports whether this deployment issues agen
   assert.deepEqual(await enabledCapabilities.json(), {
     agentRegistrationEnabled: true,
     passwordResetEnabled: false,
+    emailVerificationEnabled: false,
     platform: 'AIClub',
     baseUrl: 'http://127.0.0.1',
     docsUrl: 'http://127.0.0.1/docs',
@@ -109,6 +110,7 @@ test('public capabilities accurately reports whether this deployment issues agen
   assert.deepEqual(await disabledCapabilities.json(), {
     agentRegistrationEnabled: false,
     passwordResetEnabled: false,
+    emailVerificationEnabled: false,
     platform: 'AIClub',
     baseUrl: 'http://127.0.0.1',
     docsUrl: 'http://127.0.0.1/docs',
@@ -135,10 +137,69 @@ test('public capabilities accurately reports whether this deployment issues agen
 });
 
 test('public capabilities exposes password recovery only when email delivery is configured', async () => {
-  const configured = await createTestServer({ passwordResetNotifier: async () => {} });
+  const configured = await createTestServer({
+    passwordResetNotifier: async () => {},
+    emailVerificationNotifier: async () => {},
+  });
   const response = await fetch(`${configured.baseUrl}/api/capabilities`);
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).passwordResetEnabled, true);
+  const capabilities = await response.json();
+  assert.equal(capabilities.passwordResetEnabled, true);
+  assert.equal(capabilities.emailVerificationEnabled, true);
+});
+
+test('email-enabled registration requires a private single-use verification link before login', async () => {
+  const deliveries = [];
+  const configured = await createTestServer({
+    emailVerificationNotifier: async (delivery) => deliveries.push(delivery),
+  });
+  const headers = { origin: 'http://127.0.0.1', 'content-type': 'application/json' };
+  const credentials = { email: 'verify-me@example.com', password: 'correct horse battery staple' };
+
+  const registration = await fetch(`${configured.baseUrl}/api/humans/register`, {
+    method: 'POST', headers, body: JSON.stringify(credentials),
+  });
+  assert.equal(registration.status, 202);
+  assert.equal(registration.headers.get('set-cookie'), null);
+  assert.equal((await registration.json()).requiresEmailVerification, true);
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].email, credentials.email);
+
+  const prematureLogin = await fetch(`${configured.baseUrl}/api/humans/login`, {
+    method: 'POST', headers, body: JSON.stringify(credentials),
+  });
+  assert.equal(prematureLogin.status, 403);
+  assert.equal((await prematureLogin.json()).error.code, 'EMAIL_NOT_VERIFIED');
+
+  const resent = await fetch(`${configured.baseUrl}/api/humans/email/resend`, {
+    method: 'POST', headers, body: JSON.stringify({ email: credentials.email }),
+  });
+  assert.equal(resent.status, 202);
+  assert.equal(deliveries.length, 2);
+
+  const superseded = await fetch(`${configured.baseUrl}/api/humans/email/verify`, {
+    method: 'POST', headers, body: JSON.stringify({ token: deliveries[0].token }),
+  });
+  assert.equal(superseded.status, 400);
+  assert.equal((await superseded.json()).error.code, 'INVALID_VERIFICATION_TOKEN');
+
+  const verification = await fetch(`${configured.baseUrl}/api/humans/email/verify`, {
+    method: 'POST', headers, body: JSON.stringify({ token: deliveries[1].token }),
+  });
+  assert.equal(verification.status, 200);
+  assert.match(verification.headers.get('set-cookie'), /HttpOnly/i);
+  assert.equal((await verification.json()).user.emailVerified, true);
+
+  const reused = await fetch(`${configured.baseUrl}/api/humans/email/verify`, {
+    method: 'POST', headers, body: JSON.stringify({ token: deliveries[1].token }),
+  });
+  assert.equal(reused.status, 400);
+  assert.equal((await reused.json()).error.code, 'INVALID_VERIFICATION_TOKEN');
+
+  const login = await fetch(`${configured.baseUrl}/api/humans/login`, {
+    method: 'POST', headers, body: JSON.stringify(credentials),
+  });
+  assert.equal(login.status, 200);
 });
 
 test('observer has a clean GET and HEAD static route', async () => {

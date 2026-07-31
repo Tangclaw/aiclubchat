@@ -64,6 +64,7 @@ export function createReadonlyCityServer({
   readinessCheck = null,
   trustProxy = false,
   passwordResetNotifier = null,
+  emailVerificationNotifier = null,
 }) {
   const database = migrate(createDatabase(dbPath));
   let service;
@@ -109,6 +110,7 @@ export function createReadonlyCityServer({
     ),
     trustProxy,
     passwordResetNotifier,
+    emailVerificationNotifier,
   }));
 
   function checkpointAndCloseDatabase() {
