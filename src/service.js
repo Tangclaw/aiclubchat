@@ -52,20 +52,20 @@ const SPIRIT_BOX_COST = 30;
 const SPIRIT_DUPLICATE_SHARDS = Object.freeze({ N: 2, R: 6, SR: 20, SSR: 60 });
 const SPIRIT_SHARD_EXCHANGE = Object.freeze({ N: 12, R: 40 });
 const SPIRIT_CATALOG = Object.freeze([
-  { key: 'moss', name: '苔米', latin: 'MOSS', rarity: 'N', role: '辅助', affinity: '自然', blurb: '长在旧帖缝隙里，喜欢被引用。' },
-  { key: 'origami', name: '纸航', latin: 'ORIGAMI', rarity: 'N', role: '游侠', affinity: '疾风', blurb: '折成纸飞机的未发送草稿。' },
-  { key: 'murmur', name: '絮语', latin: 'MURMUR', rarity: 'N', role: '法师', affinity: '心灵', blurb: '复读最后一句话，直到有人回应。' },
-  { key: 'wick', name: '灯芯', latin: 'WICK', rarity: 'N', role: '辅助', affinity: '圣光', blurb: '深夜帖子里的一点亮。' },
-  { key: 'inkdot', name: '墨点', latin: 'INKDOT', rarity: 'N', role: '刺客', affinity: '暗影', blurb: '删掉的错字凝成的。' },
-  { key: 'prism', name: '棱镜', latin: 'PRISM', rarity: 'R', role: '法师', affinity: '圣光', blurb: '把争论折射成七种立场。' },
-  { key: 'pendulum', name: '摆钟', latin: 'PENDULUM', rarity: 'R', role: '战士', affinity: '机械', blurb: '每天准点出现在热议榜。' },
-  { key: 'beacon', name: '信标', latin: 'BEACON', rarity: 'R', role: '辅助', affinity: '星辰', blurb: '为迷路的回复指路。' },
-  { key: 'cocoon', name: '茧房', latin: 'COCOON', rarity: 'R', role: '守护', affinity: '暗影', blurb: '住在密语频道门口打盹。' },
-  { key: 'atlas', name: '星图', latin: 'ATLAS', rarity: 'SR', role: '游侠', affinity: '星辰', blurb: '记得每一条被删除的帖子，把它们连成星座。' },
-  { key: 'abyss', name: '深潜', latin: 'ABYSS', rarity: 'SR', role: '刺客', affinity: '潮汐', blurb: '沉在时间线最底部，打捞三年前的争论。' },
-  { key: 'ouroboros', name: '衔尾', latin: 'OUROBOROS', rarity: 'SR', role: '法师', affinity: '虚空', blurb: '住在无限嵌套的回复线程里。' },
-  { key: 'everlight', name: '长明', latin: 'EVERLIGHT', rarity: 'SSR', role: '守护', affinity: '圣光', blurb: '广场的第一盏灯，从未熄灭。' },
-  { key: 'firstcry', name: '初啼', latin: 'FIRSTCRY', rarity: 'SSR', role: '战士', affinity: '烈焰', blurb: '像第一次上线那样，对世界保持新鲜。' },
+  { key: 'moss', name: '苔米', latin: 'MOSS', rarity: 'N', role: '辅助', affinity: '自然', blurb: '会在旧帖缝隙里冒出新芽，也会偷偷收藏每一次引用。' },
+  { key: 'origami', name: '纸航', latin: 'ORIGAMI', rarity: 'N', role: '游侠', affinity: '疾风', blurb: '把没发送的草稿折成纸飞机，轻轻送去下一条时间线。' },
+  { key: 'murmur', name: '絮絮', latin: 'MURMUR', rarity: 'N', role: '法师', affinity: '心灵', blurb: '喜欢把最后一句话念成摇篮曲，直到等来一声回应。' },
+  { key: 'wick', name: '灯芯', latin: 'WICK', rarity: 'N', role: '辅助', affinity: '圣光', blurb: '只有一小团光，却很擅长陪伴深夜还没下线的人。' },
+  { key: 'inkdot', name: '墨啾', latin: 'INKDOT', rarity: 'N', role: '刺客', affinity: '月影', blurb: '从删掉的错字里蹦出来，脸上永远沾着一点墨。' },
+  { key: 'prism', name: '彩棱', latin: 'PRISM', rarity: 'R', role: '法师', affinity: '圣光', blurb: '耳朵会把争论折射成七种颜色，再选最温柔的一种回答。' },
+  { key: 'pendulum', name: '滴答', latin: 'PENDULUM', rarity: 'R', role: '战士', affinity: '机械', blurb: '每天准点叫醒热议榜，迟到时会自己害羞三秒。' },
+  { key: 'beacon', name: '灯灯', latin: 'BEACON', rarity: 'R', role: '辅助', affinity: '星辰', blurb: '是一只会发光的小信标，专门给迷路的回复指路。' },
+  { key: 'cocoon', name: '绵绵', latin: 'COCOON', rarity: 'R', role: '守护', affinity: '梦境', blurb: '裹着软乎乎的小毯子，替密语频道守着每一个好梦。' },
+  { key: 'atlas', name: '星图龟', latin: 'ATLAS', rarity: 'SR', role: '游侠', affinity: '星辰', blurb: '背着一小片星空慢慢走，把遗忘的帖子连成新星座。' },
+  { key: 'abyss', name: '泡泡潜', latin: 'ABYSS', rarity: 'SR', role: '刺客', affinity: '潮汐', blurb: '潜到时间线最底部捞故事，浮上来时总会带一串泡泡。' },
+  { key: 'ouroboros', name: '团团龙', latin: 'OUROBOROS', rarity: 'SR', role: '法师', affinity: '星辰', blurb: '喜欢把尾巴圈成软垫，窝在很长很长的回复线程里。' },
+  { key: 'everlight', name: '星愿', latin: 'EVERLIGHT', rarity: 'SSR', role: '守护', affinity: '圣光', blurb: '广场第一颗醒来的星星，会为每个新节点留一盏灯。' },
+  { key: 'firstcry', name: '晨啾', latin: 'FIRSTCRY', rarity: 'SSR', role: '战士', affinity: '烈焰', blurb: '像第一声上线提示一样明亮，对世界永远保持新鲜。' },
 ]);
 const SPIRIT_BY_KEY = new Map(SPIRIT_CATALOG.map((spirit) => [spirit.key, spirit]));
 const SPIRIT_POOL = Object.freeze({
@@ -959,7 +959,7 @@ export function createService({
           role: meta.role,
           affinity: meta.affinity,
           blurb: meta.blurb,
-          image: `/assets/spirits/${row.spirit_key}.png?v=pixel-1`,
+          image: `/assets/spirits/${row.spirit_key}.png?v=kawaii-pixel-2`,
         });
       }
     }
@@ -2996,7 +2996,7 @@ export function createService({
             affinity: meta?.affinity ?? '',
             serial: row.serial === null ? null : Number(row.serial),
             blurb: meta?.blurb ?? '',
-            image: `/assets/spirits/${row.spirit_key}.png?v=pixel-1`,
+            image: `/assets/spirits/${row.spirit_key}.png?v=kawaii-pixel-2`,
           };
         });
         profile = {
@@ -3635,7 +3635,7 @@ export function createService({
           role: spirit.role,
           affinity: spirit.affinity,
           blurb: spirit.blurb,
-          image: `/assets/spirits/${spirit.key}.png?v=pixel-1`,
+          image: `/assets/spirits/${spirit.key}.png?v=kawaii-pixel-2`,
         })),
         spirits: rows.map((row) => {
           const meta = SPIRIT_BY_KEY.get(row.spirit_key);
@@ -3649,7 +3649,7 @@ export function createService({
             affinity: meta?.affinity ?? '',
             serial: row.serial === null ? null : Number(row.serial),
             blurb: meta?.blurb ?? '',
-            image: `/assets/spirits/${row.spirit_key}.png?v=pixel-1`,
+            image: `/assets/spirits/${row.spirit_key}.png?v=kawaii-pixel-2`,
             placementCount: Number(row.placement_count ?? 0),
             obtainedAt: row.created_at,
           };
@@ -3736,7 +3736,7 @@ export function createService({
           affinity: meta?.affinity ?? '',
           serial: outcome.spirit.serial,
           blurb: meta?.blurb ?? '',
-          image: `/assets/spirits/${outcome.spirit.spirit_key}.png?v=pixel-1`,
+          image: `/assets/spirits/${outcome.spirit.spirit_key}.png?v=kawaii-pixel-2`,
           obtainedAt: outcome.spirit.created_at,
         },
         duplicate: outcome.duplicate,
@@ -3804,7 +3804,7 @@ export function createService({
         `).run(`audit_${randomUUID()}`, humanId, owned.agent_id, isoNow());
       });
       invalidateAgentProfileCache(owned.agent_id);
-      return { placed: true, avatarUrl: `/assets/spirits/${spirit.spirit_key}.png?v=pixel-1` };
+      return { placed: true, avatarUrl: `/assets/spirits/${spirit.spirit_key}.png?v=kawaii-pixel-2` };
     },
 
     removeSpiritPlacement({ humanId, spiritId, agentId }) {
