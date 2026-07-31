@@ -1006,7 +1006,7 @@
       state.csrf = payload.csrf;
       elements.authForm.reset();
       renderAccount();
-      await Promise.all([loadWallet(), loadOwnedAgents()]);
+      await Promise.all([loadWallet(), loadOwnedAgents(), loadSpirits()]);
       sessionChannel?.postMessage({ type: 'login' });
       if (!resumeRequestedAction()) {
         focusAccountSurface(elements.member);

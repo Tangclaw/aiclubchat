@@ -453,7 +453,18 @@ html[data-theme="dark"] .spirit-rarity-sr { color: #b3a6ec; background: color-mi
   opacity: .62;
 }
 .spirit-reveal img,
-.spirit-item img { image-rendering: pixelated; filter: drop-shadow(0 8px 14px rgba(119, 84, 103, .13)); }
+.spirit-item img { image-rendering: auto; filter: drop-shadow(0 8px 14px rgba(119, 84, 103, .13)); }
+.spirit-reveal img {
+  animation:
+    spirit-avatar-enter 560ms cubic-bezier(.18,.82,.2,1) both,
+    spirit-companion-breathe 6.4s 760ms ease-in-out infinite;
+}
+.spirit-item:not(.is-locked) > img {
+  transform-origin: 50% 82%;
+  animation: spirit-companion-breathe 6.4s ease-in-out infinite;
+}
+.spirit-item:nth-child(3n + 2):not(.is-locked) > img { animation-delay: -2.1s; }
+.spirit-item:nth-child(3n + 3):not(.is-locked) > img { animation-delay: -4.2s; }
 .spirit-reveal-orbit {
   color: #e76d9a;
   border-color: rgba(231, 109, 154, .42);
@@ -478,8 +489,29 @@ html[data-theme="dark"] .spirit-rarity-sr { color: #b3a6ec; background: color-mi
   box-shadow: 0 16px 34px rgba(119, 84, 103, .13);
 }
 .spirit-item:nth-child(even):hover { transform: translateY(-5px) rotate(.45deg); }
+.spirit-item:hover > img { animation-play-state: paused; transform: translateY(-2px) scale(1.035); }
+.spirit-item .spirit-rarity {
+  overflow: hidden;
+  isolation: isolate;
+}
+.spirit-item .spirit-rarity::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -45% -70%;
+  opacity: 0;
+  background: linear-gradient(110deg, transparent 38%, rgba(255,255,255,.92) 49%, transparent 60%);
+  transform: translateX(-45%);
+  pointer-events: none;
+}
+.spirit-item .spirit-rarity-sr::after,
+.spirit-item .spirit-rarity-ssr::after {
+  animation: spirit-rarity-glint 4.8s ease-in-out infinite;
+}
+.spirit-item:nth-child(even) .spirit-rarity-sr::after,
+.spirit-item:nth-child(even) .spirit-rarity-ssr::after { animation-delay: -2.4s; }
 .spirit-item.is-locked { opacity: .72; }
-.spirit-item.is-locked img { filter: grayscale(.72) brightness(1.06) opacity(.68); }
+.spirit-item.is-locked img { filter: grayscale(.72) brightness(1.06) opacity(.68); animation: none; }
 html[data-theme="dark"] .spirits-card { color: var(--ink); background: linear-gradient(150deg, #fffdf8, #fff7f3); border-color: #efd9df; }
 html[data-theme="dark"] .spirit-reveal,
 html[data-theme="dark"] .spirit-reveal.is-ssr { background: linear-gradient(135deg, #fff4d8, #fff0f5 48%, #eaf8ff); border-color: #f2d0dc; }
@@ -490,6 +522,17 @@ html[data-theme="dark"] .spirit-item:nth-child(4n + 4) { background: linear-grad
 @keyframes spirit-box-float {
   0%, 100% { transform: translateY(0) rotate(-1deg); }
   50% { transform: translateY(-5px) rotate(1deg); }
+}
+@keyframes spirit-companion-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  44% { transform: translateY(-3px) scale(1.012); }
+  50% { transform: translateY(-3px) scale(1.018, .994); }
+  56% { transform: translateY(-2px) scale(.998, 1.008); }
+}
+@keyframes spirit-rarity-glint {
+  0%, 68%, 100% { opacity: 0; transform: translateX(-45%); }
+  76% { opacity: .82; }
+  88% { opacity: 0; transform: translateX(45%); }
 }
 
 .account-footer { width: min(1160px, calc(100% - 40px)); display: flex; justify-content: space-between; gap: 20px; margin: 0 auto; padding: 25px 0 48px; color: var(--muted); border-top: 1px solid var(--line); font-size: 11px; }

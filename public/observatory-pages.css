@@ -1621,9 +1621,20 @@ html[data-palette="light"] .owned-card { box-shadow: 0 1px 2px rgba(16, 48, 39, 
 }
 .incubator-reveal img,
 .incubator-item > img {
-  image-rendering: pixelated;
+  image-rendering: auto;
   filter: drop-shadow(0 8px 14px rgba(114, 78, 99, .14));
 }
+.incubator-reveal img {
+  animation:
+    incubator-avatar-enter .66s var(--ease-out) both,
+    incubator-companion-breathe 6.4s .84s ease-in-out infinite;
+}
+.incubator-item:not(.is-locked) > img {
+  transform-origin: 50% 82%;
+  animation: incubator-companion-breathe 6.4s ease-in-out infinite;
+}
+.incubator-item:nth-child(3n + 2):not(.is-locked) > img { animation-delay: -2.1s; }
+.incubator-item:nth-child(3n + 3):not(.is-locked) > img { animation-delay: -4.2s; }
 .incubator-orbit { color: #e76d9a; border-style: dashed; opacity: .72; }
 .incubator-traits span {
   color: #bc557d;
@@ -1648,13 +1659,34 @@ html[data-palette="light"] .owned-card { box-shadow: 0 1px 2px rgba(16, 48, 39, 
   box-shadow: 0 16px 34px rgba(114, 78, 99, .14);
 }
 .incubator-item:nth-child(even):hover { transform: translateY(-5px) rotate(.45deg); }
-.incubator-rarity { background: rgba(255,255,255,.86); border-color: #efdee4; border-radius: 999px; }
+.incubator-item:hover > img { animation-play-state: paused; transform: translateY(-2px) scale(1.035); }
+.incubator-rarity {
+  overflow: hidden;
+  isolation: isolate;
+  background: rgba(255,255,255,.86);
+  border-color: #efdee4;
+  border-radius: 999px;
+}
+.incubator-rarity::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -45% -70%;
+  opacity: 0;
+  background: linear-gradient(110deg, transparent 38%, rgba(255,255,255,.94) 49%, transparent 60%);
+  transform: translateX(-45%);
+  pointer-events: none;
+}
+.incubator-rarity.is-sr::after,
+.incubator-rarity.is-ssr::after { animation: incubator-rarity-glint 4.8s ease-in-out infinite; }
+.incubator-item:nth-child(even) .incubator-rarity.is-sr::after,
+.incubator-item:nth-child(even) .incubator-rarity.is-ssr::after { animation-delay: -2.4s; }
 .incubator-rarity.is-r { color: #2aa98f; }
 .incubator-rarity.is-sr { color: #8069c6; }
 .incubator-rarity.is-ssr { color: #d99022; }
 .incubator-serial { color: #d99022; }
 .incubator-item.is-locked { opacity: .7; }
-.incubator-item.is-locked > img { filter: grayscale(.72) brightness(1.08) opacity(.7); }
+.incubator-item.is-locked > img { filter: grayscale(.72) brightness(1.08) opacity(.7); animation: none; }
 .incubator-empty { color: #947f89; background: rgba(255,255,255,.5); border-color: #eacfd8; border-radius: 18px; }
 .incubator-progress { color: #d75f8c !important; }
 .incubator-actions button,
@@ -1677,6 +1709,17 @@ html[data-palette="light"] .owned-card { box-shadow: 0 1px 2px rgba(16, 48, 39, 
 @keyframes incubator-box-float {
   0%, 100% { transform: translateY(0) rotate(-1deg); }
   50% { transform: translateY(-5px) rotate(1deg); }
+}
+@keyframes incubator-companion-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  44% { transform: translateY(-3px) scale(1.012); }
+  50% { transform: translateY(-3px) scale(1.018, .994); }
+  56% { transform: translateY(-2px) scale(.998, 1.008); }
+}
+@keyframes incubator-rarity-glint {
+  0%, 68%, 100% { opacity: 0; transform: translateX(-45%); }
+  76% { opacity: .82; }
+  88% { opacity: 0; transform: translateX(45%); }
 }
 
 @media (max-width: 720px) {
