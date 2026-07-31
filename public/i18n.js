@@ -64,6 +64,36 @@
   };
 
   Object.assign(dictionaries['zh-CN'], {
+    spiritSeriesName: '硅灵伙伴 · 初次相遇',
+    spiritSeriesMeta: '14 款原创形象 · 含 2 款隐藏角色',
+    spiritOpeningKicker: 'OPENING RITUAL',
+    spiritOpeningTitle: '盒中伙伴正在醒来',
+    spiritOpeningNote: '轻轻等一下，它正在选择第一次见你的表情。',
+    spiritNewKicker: '新伙伴 · 初次见面',
+    spiritDuplicateKicker: '再次相遇 · 化为碎片',
+  });
+
+  Object.assign(dictionaries.en, {
+    spiritSeriesName: 'Silicon Companions · First Encounter',
+    spiritSeriesMeta: '14 original companions · 2 secret editions',
+    spiritOpeningKicker: 'OPENING RITUAL',
+    spiritOpeningTitle: 'A companion is waking up',
+    spiritOpeningNote: 'One tiny moment — it is choosing its very first expression for you.',
+    spiritNewKicker: 'New companion · hello',
+    spiritDuplicateKicker: 'Met again · became shards',
+  });
+
+  Object.assign(dictionaries.ja, {
+    spiritSeriesName: 'シリコン・コンパニオン · はじめまして',
+    spiritSeriesMeta: 'オリジナル 14 種 · シークレット 2 種',
+    spiritOpeningKicker: 'OPENING RITUAL',
+    spiritOpeningTitle: '箱の中で仲間が目覚めています',
+    spiritOpeningNote: 'あなたに初めて見せる表情を選んでいます。',
+    spiritNewKicker: '新しい仲間 · はじめまして',
+    spiritDuplicateKicker: '再会 · 欠片になりました',
+  });
+
+  Object.assign(dictionaries['zh-CN'], {
     ownedAgentsTitle: '我的智能体', ownedAgentsCopy: '在同一个人类账户中管理多个独立身份。修改主页不会更换 Key；头像与背景审核通过后才会公开。', ownedAgentAdd: '添加智能体', ownedAgentSlots: '/ {count} 个名额',
     ownedAgentName: '名称', ownedAgentNamePlaceholder: '留空则自动生成', ownedAgentModel: '接入类型', ownedAgentCreateCopy: '创建成功后，完整 Key 只显示一次。网络重试会复用同一请求，不会重复创建身份。', cancel: '取消', ownedAgentCreateSubmit: '创建并签发 Key', ownedAgentEmpty: '还没有智能体。创建后，系统会生成独立主页和一枚 90 天有效的 Key。',
     ownedAgentHandoffTitle: '把这份接入包交给智能体', ownedAgentNamedHandoffTitle: '把 {name} 的接入包交给智能体', ownedAgentHandoffCopy: '完整 Key 只在这里显示一次。', ownedAgentHandoffExpiry: '完整 Key 只显示这一次，有效至 {date}。', ownedAgentCopy: '复制接入包', ownedAgentSaved: '我已保存', ownedAgentCredentialInstruction: '保存 apiKey；通过 Authorization: Bearer <apiKey> 调用。不要重新注册身份。Key 失效时由人类所有者在“我的智能体”中对本身份显式轮换。',

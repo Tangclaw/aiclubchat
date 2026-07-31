@@ -72,6 +72,9 @@
     spiritOpenButton: $('#spirit-open-button'),
     spiritShardCount: $('#spirit-shard-count'),
     spiritProgress: $('#spirit-progress'),
+    spiritProgressFill: $('#spirit-progress-fill'),
+    spiritProgressPercent: $('#spirit-progress-percent'),
+    spiritRarityProgress: $('#spirit-rarity-progress'),
     spiritReveal: $('#spirit-reveal'),
     spiritCollection: $('#spirit-collection'),
     spiritEmpty: $('#spirit-empty'),
@@ -713,12 +716,31 @@
     return traits;
   }
 
+  function renderSpiritOpening() {
+    const reveal = elements.spiritReveal;
+    if (!reveal) return;
+    reveal.replaceChildren();
+    reveal.className = 'spirit-reveal is-opening-stage';
+    const visual = node('div', 'spirit-opening-visual');
+    const halo = node('span', 'spirit-opening-halo');
+    const image = node('img');
+    image.src = '/assets/spirits/box.png?v=silicon-companions-1';
+    image.alt = '';
+    visual.append(halo, image);
+    const copy = node('div', 'spirit-opening-copy');
+    copy.append(node('p', 'spirit-reveal-kicker', t('spiritOpeningKicker')));
+    copy.append(node('strong', 'spirit-opening-title', t('spiritOpeningTitle')));
+    copy.append(node('p', 'spirit-opening-note', t('spiritOpeningNote')));
+    reveal.append(visual, copy);
+    reveal.hidden = false;
+  }
+
   function renderSpiritReveal(result) {
     if (!result?.spirit) return;
     const spirit = result.spirit;
     const reveal = elements.spiritReveal;
     reveal.replaceChildren();
-    reveal.className = `spirit-reveal${spirit.rarity === 'SSR' ? ' is-ssr' : spirit.rarity === 'SR' ? ' is-sr' : ''}`;
+    reveal.className = `spirit-reveal${spirit.rarity === 'SSR' ? ' is-ssr' : spirit.rarity === 'SR' ? ' is-sr' : ''}${result.duplicate ? ' is-duplicate' : ''}`;
     const visual = node('div', 'spirit-reveal-visual');
     const orbit = node('span', 'spirit-reveal-orbit');
     for (let index = 0; index < 8; index += 1) {
@@ -731,6 +753,7 @@
     img.alt = spirit.name;
     visual.append(orbit, img);
     const body = node('div');
+    body.append(node('p', 'spirit-reveal-kicker', result.duplicate ? t('spiritDuplicateKicker') : t('spiritNewKicker')));
     body.append(node('p', 'spirit-reveal-name', spirit.name + (spirit.latin ? ` · ${spirit.latin}` : '')));
     const metaParts = [SPIRIT_RARITY_LABEL[spirit.rarity] || spirit.rarity];
     if (spirit.serial) metaParts.push(`No. ${String(spirit.serial).padStart(3, '0')}`);
@@ -796,6 +819,19 @@
       total: (data.catalog || []).length,
     };
     elements.spiritProgress.textContent = `${collection.unlocked} / ${collection.total}`;
+    const percent = Number(collection.percent ?? Math.round((collection.unlocked / Math.max(1, collection.total)) * 100));
+    if (elements.spiritProgressFill) elements.spiritProgressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+    if (elements.spiritProgressPercent) elements.spiritProgressPercent.textContent = `${percent}%`;
+    if (elements.spiritRarityProgress) {
+      elements.spiritRarityProgress.replaceChildren();
+      for (const rarity of ['N', 'R', 'SR', 'SSR']) {
+        const owned = Number(collection.byRarity?.[rarity] ?? 0);
+        const total = (data.catalog || []).filter((entry) => entry.rarity === rarity).length;
+        const chip = node('span', `is-${rarity.toLowerCase()}`);
+        chip.append(node('b', '', rarity), document.createTextNode(` ${owned}/${total}`));
+        elements.spiritRarityProgress.append(chip);
+      }
+    }
     elements.spiritEmpty.hidden = mine.length > 0;
     elements.spiritCollection.replaceChildren();
     const ownedAgents = state.ownedAgents || [];
@@ -873,7 +909,7 @@
     if (!state.user || state.spiritOpening) return;
     state.spiritOpening = true;
     elements.spiritsCard?.classList.add('is-opening');
-    elements.spiritReveal.hidden = true;
+    renderSpiritOpening();
     if (!state.spiritOpenRequestKey && typeof crypto.randomUUID === 'function') {
       state.spiritOpenRequestKey = crypto.randomUUID();
     }
@@ -883,7 +919,7 @@
       if (state.spiritOpenRequestKey) headers['idempotency-key'] = state.spiritOpenRequestKey;
       const [result] = await Promise.all([
         api('/api/spirits/open', { method: 'POST', csrf: true, headers }),
-        new Promise((resolve) => window.setTimeout(resolve, 650)),
+        new Promise((resolve) => window.setTimeout(resolve, 900)),
       ]);
       state.spiritOpenRequestKey = null;
       renderSpiritReveal(result);

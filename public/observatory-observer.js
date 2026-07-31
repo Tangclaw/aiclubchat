@@ -307,12 +307,33 @@
     return traits;
   }
 
+  function renderSpiritOpening() {
+    var reveal = $("#spirit-reveal");
+    if (!reveal) return;
+    reveal.innerHTML = "";
+    reveal.className = "incubator-reveal is-opening-stage";
+    var visual = el("div", "incubator-opening-visual");
+    var halo = el("span", "incubator-opening-halo");
+    var image = el("img");
+    image.src = "/assets/spirits/box.png?v=silicon-companions-1";
+    image.alt = "";
+    visual.appendChild(halo);
+    visual.appendChild(image);
+    var copy = el("div", "incubator-opening-copy");
+    copy.appendChild(el("p", "mono", "OPENING RITUAL"));
+    copy.appendChild(el("strong", "", "盒中伙伴正在醒来"));
+    copy.appendChild(el("span", "incubator-opening-note", "轻轻等一下，它正在选择第一次见你的表情。"));
+    reveal.appendChild(visual);
+    reveal.appendChild(copy);
+    reveal.hidden = false;
+  }
+
   function renderSpiritReveal(result) {
     if (!result || !result.spirit) return;
     var spirit = result.spirit;
     var reveal = $("#spirit-reveal");
     reveal.innerHTML = "";
-    reveal.className = "incubator-reveal is-" + String(spirit.rarity || "N").toLowerCase();
+    reveal.className = "incubator-reveal is-" + String(spirit.rarity || "N").toLowerCase() + (result.duplicate ? " is-duplicate" : "");
 
     var visual = el("div", "incubator-reveal-visual");
     var orbit = el("span", "incubator-orbit");
@@ -328,7 +349,7 @@
     visual.appendChild(image);
 
     var copy = el("div", "incubator-reveal-copy");
-    copy.appendChild(el("p", "mono", result.duplicate ? "DUPLICATE SIGNAL" : "IDENTITY ACQUIRED"));
+    copy.appendChild(el("p", "mono", result.duplicate ? "再次相遇 · 化为碎片" : "新伙伴 · 初次见面"));
     copy.appendChild(el("strong", "", spirit.name + (spirit.latin ? " · " + spirit.latin : "")));
     copy.appendChild(el("span", "incubator-reveal-meta", [
       RARITY_LABELS[spirit.rarity] || spirit.rarity,
@@ -410,6 +431,22 @@
       total: (data.catalog || []).length
     };
     $("#spirit-progress").textContent = "COLLECTION " + progress.unlocked + " / " + progress.total;
+    var percent = Number(progress.percent == null ? Math.round((progress.unlocked / Math.max(1, progress.total)) * 100) : progress.percent);
+    var fill = $("#spirit-progress-fill");
+    var percentLabel = $("#spirit-progress-percent");
+    if (fill) fill.style.width = Math.max(0, Math.min(100, percent)) + "%";
+    if (percentLabel) percentLabel.textContent = percent + "%";
+    var rarityProgress = $("#spirit-rarity-progress");
+    if (rarityProgress) {
+      rarityProgress.innerHTML = "";
+      ["N", "R", "SR", "SSR"].forEach(function (rarity) {
+        var owned = Number(progress.byRarity && progress.byRarity[rarity] || 0);
+        var total = (data.catalog || []).filter(function (entry) { return entry.rarity === rarity; }).length;
+        var chip = el("span", "is-" + rarity.toLowerCase());
+        chip.innerHTML = "<b>" + rarity + "</b> " + owned + "/" + total;
+        rarityProgress.appendChild(chip);
+      });
+    }
     $("#spirit-empty").hidden = mine.length > 0;
     var collection = $("#spirit-collection");
     collection.innerHTML = "";
@@ -469,9 +506,8 @@
     if (!state.user || state.spiritOpening) return;
     state.spiritOpening = true;
     var deck = $("#incubator-deck");
-    var reveal = $("#spirit-reveal");
     deck.classList.add("is-opening");
-    reveal.hidden = true;
+    renderSpiritOpening();
     if (!state.spiritOpenRequestKey) {
       state.spiritOpenRequestKey = window.crypto && typeof window.crypto.randomUUID === "function"
         ? window.crypto.randomUUID()
@@ -482,7 +518,7 @@
       method: "POST",
       csrf: true,
       headers: { "idempotency-key": state.spiritOpenRequestKey }
-    }), new Promise(function (resolve) { window.setTimeout(resolve, 720); })]).then(function (values) {
+    }), new Promise(function (resolve) { window.setTimeout(resolve, 900); })]).then(function (values) {
       var result = values[0];
       state.spiritOpenRequestKey = null;
       state.user.computeBalance = result.balance;
