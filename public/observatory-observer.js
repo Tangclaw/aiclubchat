@@ -300,6 +300,13 @@
     return el("span", "incubator-rarity is-" + String(rarity || "N").toLowerCase(), rarity || "N");
   }
 
+  function spiritTraits(spirit) {
+    var traits = el("div", "incubator-traits");
+    if (spirit && spirit.role) traits.appendChild(el("span", "", "定位 · " + spirit.role));
+    if (spirit && spirit.affinity) traits.appendChild(el("span", "", "属性 · " + spirit.affinity));
+    return traits;
+  }
+
   function renderSpiritReveal(result) {
     if (!result || !result.spirit) return;
     var spirit = result.spirit;
@@ -328,6 +335,7 @@
       spirit.serial ? "No. " + String(spirit.serial).padStart(3, "0") : "",
       result.duplicate ? "重复转化 +" + result.shardsGranted + " 碎片" : ""
     ].filter(Boolean).join(" · ")));
+    copy.appendChild(spiritTraits(spirit));
     if (spirit.blurb) copy.appendChild(el("p", "", spirit.blurb));
 
     var actions = el("div", "incubator-reveal-actions");
@@ -375,6 +383,7 @@
     card.appendChild(image);
     card.appendChild(el("strong", "", locked ? "未解锁" : spirit.name));
     card.appendChild(el("small", "mono", locked ? (RARITY_LABELS[spirit.rarity] || spirit.rarity) : (spirit.latin || "")));
+    if (!locked) card.appendChild(spiritTraits(spirit));
     if (!locked && spirit.blurb) card.appendChild(el("p", "incubator-blurb", spirit.blurb));
     return card;
   }
@@ -396,6 +405,11 @@
           : "算力不足 · 需要 " + cost;
 
     var mine = data.spirits || [];
+    var progress = data.collection || {
+      unlocked: new Set(mine.map(function (spirit) { return spirit.key; })).size,
+      total: (data.catalog || []).length
+    };
+    $("#spirit-progress").textContent = "COLLECTION " + progress.unlocked + " / " + progress.total;
     $("#spirit-empty").hidden = mine.length > 0;
     var collection = $("#spirit-collection");
     collection.innerHTML = "";

@@ -1463,6 +1463,16 @@ html[data-palette="light"] .owned-card { box-shadow: 0 1px 2px rgba(16, 48, 39, 
 }
 .incubator-reveal strong { display: block; margin: 4px 0; font: 700 23px/1.2 var(--font-display); }
 .incubator-reveal-meta { color: var(--amber); font: 600 10px/1.5 var(--font-mono); letter-spacing: .08em; }
+.incubator-traits { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin-top: 7px; }
+.incubator-reveal-copy .incubator-traits { justify-content: flex-start; }
+.incubator-traits span {
+  padding: 3px 7px;
+  color: var(--teal);
+  background: rgba(43, 228, 176, .06);
+  border: 1px solid rgba(43, 228, 176, .2);
+  font: 650 8px/1.35 var(--font-mono);
+  letter-spacing: .04em;
+}
 .incubator-reveal-copy > p:last-of-type { margin-top: 8px; color: var(--dim); font-size: 12px; }
 .incubator-reveal-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
 .incubator-reveal-actions button,
@@ -1483,6 +1493,7 @@ html[data-palette="light"] .owned-card { box-shadow: 0 1px 2px rgba(16, 48, 39, 
 .incubator-shelf-head { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 13px; }
 .incubator-shelf-head h3 { font: 700 16px/1.2 var(--font-display); }
 .incubator-shelf-head span { color: var(--faint); font-size: 9px; }
+.incubator-shelf-head .incubator-progress { color: var(--teal); }
 .incubator-empty { padding: 22px; color: var(--faint); text-align: center; border: 1px dashed var(--line2); }
 .incubator-grid {
   display: grid;

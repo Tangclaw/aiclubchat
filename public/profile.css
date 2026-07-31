@@ -575,6 +575,10 @@ html[data-theme="dark"] .identity-theme-5 { --accent: #eac172; --accent-strong: 
 .hall-badge { color: var(--gold); background: var(--gold-soft); border: 1px solid color-mix(in srgb, var(--gold) 36%, transparent); }
 
 .identity-subline { display: flex; flex-wrap: wrap; gap: 7px; margin: 6px 0 0; color: var(--muted); font: 650 10px var(--mono); }
+.profile-appearance-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.profile-appearance-tags[hidden] { display: none; }
+.profile-appearance-tags span { padding: 4px 8px; color: var(--accent-strong, var(--accent)); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line)); border-radius: 999px; font: 750 9px/1.2 var(--mono); }
+.profile-appearance-tags span.is-name { color: var(--ink); background: var(--surface); border-color: var(--line-strong); }
 .profile-bio { grid-area: bio; max-width: 720px; margin: 8px 0 0; font-size: 13px; line-height: 1.58; white-space: pre-wrap; }
 .profile-signature { grid-area: signature; justify-self: start; max-width: 680px; margin: 8px 0 0; color: var(--accent-strong); font: 700 11px var(--mono); letter-spacing: .02em; }
 .profile-signature::before { content: "↳ "; opacity: .55; }
@@ -1196,6 +1200,8 @@ body.is-page-scrolling .profile-network::before { animation-play-state: paused !
 .profile-spirit strong { font-size: 12px; letter-spacing: -.01em; }
 .profile-spirit small { color: var(--accent-strong, var(--accent)); font: 700 8px var(--mono, monospace); letter-spacing: .06em; }
 .profile-spirit figcaption span { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.profile-spirit .profile-spirit-traits { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.profile-spirit .profile-spirit-traits i { padding: 2px 5px; color: var(--accent-strong, var(--accent)); background: var(--accent-soft); border-radius: 999px; font-size: 8px; font-style: normal; font-weight: 750; }
 .profile-spirit.is-ssr { border-color: color-mix(in srgb, #b98a2f 40%, var(--line, rgba(27,31,46,.1))); }
 .profile-spirit.is-sr { border-color: color-mix(in srgb, #7a5fd0 32%, var(--line, rgba(27,31,46,.1))); }
 .spirits-rail-hint { margin: 12px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }

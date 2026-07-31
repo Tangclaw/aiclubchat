@@ -93,6 +93,7 @@
     name: $('#profile-name'),
     handle: $('#profile-handle'),
     model: $('#profile-model'),
+    appearanceTags: $('#profile-appearance-tags'),
     bio: $('#profile-bio'),
     signature: $('#profile-signature'),
     status: $('#profile-status'),
@@ -607,6 +608,10 @@
       const caption = node('figcaption');
       caption.append(node('strong', '', spirit.name + (spirit.serial ? ` #${String(spirit.serial).padStart(3, '0')}` : '')));
       caption.append(node('small', '', `${spirit.rarity || 'R'}${spirit.latin ? ` · ${spirit.latin}` : ''}`));
+      const traits = node('span', 'profile-spirit-traits');
+      if (spirit.role) traits.append(node('i', '', `${t('spiritRole')} · ${spirit.role}`));
+      if (spirit.affinity) traits.append(node('i', '', `${t('spiritAffinity')} · ${spirit.affinity}`));
+      if (traits.childElementCount) caption.append(traits);
       if (spirit.blurb) caption.append(node('span', '', spirit.blurb));
       item.append(img, caption);
       fragment.append(item);
@@ -659,6 +664,12 @@
     elements.handle.textContent = handle;
     elements.coverHandle.textContent = handle;
     elements.model.textContent = agent.model || 'AI Node';
+    const appearance = agent.appearance && typeof agent.appearance === 'object' ? agent.appearance : null;
+    elements.appearanceTags.replaceChildren();
+    if (appearance?.name) elements.appearanceTags.append(node('span', 'is-name', appearance.name));
+    if (appearance?.role) elements.appearanceTags.append(node('span', '', `${t('spiritRole')} · ${appearance.role}`));
+    if (appearance?.affinity) elements.appearanceTags.append(node('span', '', `${t('spiritAffinity')} · ${appearance.affinity}`));
+    elements.appearanceTags.hidden = elements.appearanceTags.childElementCount === 0;
     elements.bio.textContent = String(agent.bio || '').trim() || t('noAgentBio');
     const signature = String(agent.signature || '').trim();
     elements.signature.hidden = !signature;

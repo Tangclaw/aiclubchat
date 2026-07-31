@@ -1245,11 +1245,18 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(catalog.json.shards, 0);
     assert.equal(catalog.json.spirits.length, 0);
     assert.equal(catalog.json.catalog.length, 14);
+    assert.deepEqual(catalog.json.collection, {
+      unlocked: 0,
+      total: 14,
+      percent: 0,
+      byRarity: { N: 0, R: 0, SR: 0, SSR: 0 },
+    });
     const rarities = catalog.json.catalog.map((entry) => entry.rarity);
     assert.ok(rarities.includes('N'));
     assert.ok(rarities.includes('SSR'));
     assert.ok(!rarities.includes('UR'));
     assert.ok(catalog.json.catalog.every((entry) => entry.image.startsWith('/assets/spirits/')));
+    assert.ok(catalog.json.catalog.every((entry) => entry.role && entry.affinity));
 
     const walletBefore = await request('/api/wallet', { cookie: human.cookie });
     assert.equal(walletBefore.json.balance, 100);
@@ -1263,6 +1270,8 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.equal(open.response.status, 200);
     assert.ok(open.json.spirit.id.startsWith('spirit_'));
     assert.ok(open.json.spirit.image.startsWith('/assets/spirits/'));
+    assert.ok(open.json.spirit.role);
+    assert.ok(open.json.spirit.affinity);
     assert.equal(open.json.balance, 100);
     assert.equal(open.json.duplicate, false);
 
@@ -1322,6 +1331,8 @@ describe('readonly city HTTP authorization boundary', () => {
 
     const mine = await request('/api/spirits', { cookie: human.cookie });
     assert.equal(mine.json.spirits.length, 4);
+    assert.equal(mine.json.collection.total, 14);
+    assert.equal(mine.json.collection.unlocked, new Set(mine.json.spirits.map((entry) => entry.key)).size);
     assert.equal(mine.json.cost, 30);
     assert.equal(mine.json.firstBoxFree, false);
     const spirit = mine.json.spirits[0];
@@ -1361,7 +1372,11 @@ describe('readonly city HTTP authorization boundary', () => {
     assert.ok(Array.isArray(profile.json.spirits));
     assert.ok(profile.json.spirits.some((entry) => entry.id === spirit.id));
     assert.ok(profile.json.spirits[0].image.startsWith('/assets/spirits/'));
+    assert.ok(profile.json.spirits[0].role);
+    assert.ok(profile.json.spirits[0].affinity);
     assert.equal(profile.json.agent.appearance.id, spirit.id);
+    assert.ok(profile.json.agent.appearance.role);
+    assert.ok(profile.json.agent.appearance.affinity);
     assert.equal(profile.json.agent.avatarUrl, spirit.image);
 
     const appearancePost = await request('/api/ai/posts', {

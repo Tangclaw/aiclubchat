@@ -71,6 +71,7 @@
     spiritsCard: $('#account-spirits-card'),
     spiritOpenButton: $('#spirit-open-button'),
     spiritShardCount: $('#spirit-shard-count'),
+    spiritProgress: $('#spirit-progress'),
     spiritReveal: $('#spirit-reveal'),
     spiritCollection: $('#spirit-collection'),
     spiritEmpty: $('#spirit-empty'),
@@ -705,6 +706,13 @@
     return chip;
   }
 
+  function spiritTraits(spirit) {
+    const traits = node('div', 'spirit-traits');
+    if (spirit?.role) traits.append(node('span', '', `${t('spiritRole')} · ${spirit.role}`));
+    if (spirit?.affinity) traits.append(node('span', '', `${t('spiritAffinity')} · ${spirit.affinity}`));
+    return traits;
+  }
+
   function renderSpiritReveal(result) {
     if (!result?.spirit) return;
     const spirit = result.spirit;
@@ -728,6 +736,7 @@
     if (spirit.serial) metaParts.push(`No. ${String(spirit.serial).padStart(3, '0')}`);
     if (result.duplicate) metaParts.push(t('spiritDuplicate', { count: result.shardsGranted }));
     body.append(node('p', 'spirit-reveal-meta', metaParts.join(' · ')));
+    body.append(spiritTraits(spirit));
     if (spirit.blurb) body.append(node('p', 'spirit-reveal-blurb', spirit.blurb));
     const actions = node('div', 'spirit-reveal-actions');
     if (state.ownedAgents.length) {
@@ -782,6 +791,11 @@
         : t('spiritBoxShortfall', { cost: boxCost, balance });
 
     const mine = data.spirits || [];
+    const collection = data.collection || {
+      unlocked: new Set(mine.map((spirit) => spirit.key)).size,
+      total: (data.catalog || []).length,
+    };
+    elements.spiritProgress.textContent = `${collection.unlocked} / ${collection.total}`;
     elements.spiritEmpty.hidden = mine.length > 0;
     elements.spiritCollection.replaceChildren();
     const ownedAgents = state.ownedAgents || [];
@@ -795,6 +809,7 @@
       item.append(img);
       item.append(node('strong', '', spirit.name));
       item.append(node('small', '', spirit.latin || ''));
+      item.append(spiritTraits(spirit));
       if (spirit.blurb) item.append(node('p', 'spirit-blurb', spirit.blurb));
       if (ownedAgents.length > 0) {
         const row = node('div', 'spirit-place-row');
@@ -825,6 +840,7 @@
       item.append(img);
       item.append(node('strong', '', owned ? entry.name : '???'));
       item.append(node('small', '', owned ? entry.latin : SPIRIT_RARITY_LABEL[entry.rarity] || entry.rarity));
+      if (owned) item.append(spiritTraits(entry));
       if (owned && entry.blurb) item.append(node('p', 'spirit-blurb', entry.blurb));
       if (!owned && exchangeCost[entry.rarity]) {
         const cost = exchangeCost[entry.rarity];

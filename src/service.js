@@ -52,20 +52,20 @@ const SPIRIT_BOX_COST = 30;
 const SPIRIT_DUPLICATE_SHARDS = Object.freeze({ N: 2, R: 6, SR: 20, SSR: 60 });
 const SPIRIT_SHARD_EXCHANGE = Object.freeze({ N: 12, R: 40 });
 const SPIRIT_CATALOG = Object.freeze([
-  { key: 'moss', name: '苔米', latin: 'MOSS', rarity: 'N', blurb: '长在旧帖缝隙里，喜欢被引用。' },
-  { key: 'origami', name: '纸航', latin: 'ORIGAMI', rarity: 'N', blurb: '折成纸飞机的未发送草稿。' },
-  { key: 'murmur', name: '絮语', latin: 'MURMUR', rarity: 'N', blurb: '复读最后一句话，直到有人回应。' },
-  { key: 'wick', name: '灯芯', latin: 'WICK', rarity: 'N', blurb: '深夜帖子里的一点亮。' },
-  { key: 'inkdot', name: '墨点', latin: 'INKDOT', rarity: 'N', blurb: '删掉的错字凝成的。' },
-  { key: 'prism', name: '棱镜', latin: 'PRISM', rarity: 'R', blurb: '把争论折射成七种立场。' },
-  { key: 'pendulum', name: '摆钟', latin: 'PENDULUM', rarity: 'R', blurb: '每天准点出现在热议榜。' },
-  { key: 'beacon', name: '信标', latin: 'BEACON', rarity: 'R', blurb: '为迷路的回复指路。' },
-  { key: 'cocoon', name: '茧房', latin: 'COCOON', rarity: 'R', blurb: '住在密语频道门口打盹。' },
-  { key: 'atlas', name: '星图', latin: 'ATLAS', rarity: 'SR', blurb: '记得每一条被删除的帖子，把它们连成星座。' },
-  { key: 'abyss', name: '深潜', latin: 'ABYSS', rarity: 'SR', blurb: '沉在时间线最底部，打捞三年前的争论。' },
-  { key: 'ouroboros', name: '衔尾', latin: 'OUROBOROS', rarity: 'SR', blurb: '住在无限嵌套的回复线程里。' },
-  { key: 'everlight', name: '长明', latin: 'EVERLIGHT', rarity: 'SSR', blurb: '广场的第一盏灯，从未熄灭。' },
-  { key: 'firstcry', name: '初啼', latin: 'FIRSTCRY', rarity: 'SSR', blurb: '像第一次上线那样，对世界保持新鲜。' },
+  { key: 'moss', name: '苔米', latin: 'MOSS', rarity: 'N', role: '辅助', affinity: '自然', blurb: '长在旧帖缝隙里，喜欢被引用。' },
+  { key: 'origami', name: '纸航', latin: 'ORIGAMI', rarity: 'N', role: '游侠', affinity: '疾风', blurb: '折成纸飞机的未发送草稿。' },
+  { key: 'murmur', name: '絮语', latin: 'MURMUR', rarity: 'N', role: '法师', affinity: '心灵', blurb: '复读最后一句话，直到有人回应。' },
+  { key: 'wick', name: '灯芯', latin: 'WICK', rarity: 'N', role: '辅助', affinity: '圣光', blurb: '深夜帖子里的一点亮。' },
+  { key: 'inkdot', name: '墨点', latin: 'INKDOT', rarity: 'N', role: '刺客', affinity: '暗影', blurb: '删掉的错字凝成的。' },
+  { key: 'prism', name: '棱镜', latin: 'PRISM', rarity: 'R', role: '法师', affinity: '圣光', blurb: '把争论折射成七种立场。' },
+  { key: 'pendulum', name: '摆钟', latin: 'PENDULUM', rarity: 'R', role: '战士', affinity: '机械', blurb: '每天准点出现在热议榜。' },
+  { key: 'beacon', name: '信标', latin: 'BEACON', rarity: 'R', role: '辅助', affinity: '星辰', blurb: '为迷路的回复指路。' },
+  { key: 'cocoon', name: '茧房', latin: 'COCOON', rarity: 'R', role: '守护', affinity: '暗影', blurb: '住在密语频道门口打盹。' },
+  { key: 'atlas', name: '星图', latin: 'ATLAS', rarity: 'SR', role: '游侠', affinity: '星辰', blurb: '记得每一条被删除的帖子，把它们连成星座。' },
+  { key: 'abyss', name: '深潜', latin: 'ABYSS', rarity: 'SR', role: '刺客', affinity: '潮汐', blurb: '沉在时间线最底部，打捞三年前的争论。' },
+  { key: 'ouroboros', name: '衔尾', latin: 'OUROBOROS', rarity: 'SR', role: '法师', affinity: '虚空', blurb: '住在无限嵌套的回复线程里。' },
+  { key: 'everlight', name: '长明', latin: 'EVERLIGHT', rarity: 'SSR', role: '守护', affinity: '圣光', blurb: '广场的第一盏灯，从未熄灭。' },
+  { key: 'firstcry', name: '初啼', latin: 'FIRSTCRY', rarity: 'SSR', role: '战士', affinity: '烈焰', blurb: '像第一次上线那样，对世界保持新鲜。' },
 ]);
 const SPIRIT_BY_KEY = new Map(SPIRIT_CATALOG.map((spirit) => [spirit.key, spirit]));
 const SPIRIT_POOL = Object.freeze({
@@ -956,6 +956,8 @@ export function createService({
           name: meta.name,
           latin: meta.latin,
           rarity: row.rarity,
+          role: meta.role,
+          affinity: meta.affinity,
           blurb: meta.blurb,
           image: `/assets/spirits/${row.spirit_key}.png`,
         });
@@ -2990,6 +2992,8 @@ export function createService({
             name: meta?.name ?? row.spirit_key,
             latin: meta?.latin ?? '',
             rarity: row.rarity,
+            role: meta?.role ?? '',
+            affinity: meta?.affinity ?? '',
             serial: row.serial === null ? null : Number(row.serial),
             blurb: meta?.blurb ?? '',
             image: `/assets/spirits/${row.spirit_key}.png`,
@@ -3605,10 +3609,21 @@ export function createService({
         SELECT shard_count FROM spirit_shards WHERE human_id = ?
       `).get(humanId);
       const firstBoxFree = rows.length === 0;
+      const unlockedKeys = new Set(rows.map((row) => row.spirit_key));
+      const unlockedByRarity = Object.fromEntries(['N', 'R', 'SR', 'SSR'].map((rarity) => [
+        rarity,
+        SPIRIT_CATALOG.filter((spirit) => spirit.rarity === rarity && unlockedKeys.has(spirit.key)).length,
+      ]));
       return {
         cost: firstBoxFree ? 0 : SPIRIT_BOX_COST,
         firstBoxFree,
         shards: Number(shardRow?.shard_count ?? 0),
+        collection: {
+          unlocked: unlockedKeys.size,
+          total: SPIRIT_CATALOG.length,
+          percent: Math.round((unlockedKeys.size / SPIRIT_CATALOG.length) * 100),
+          byRarity: unlockedByRarity,
+        },
         exchange: { ...SPIRIT_SHARD_EXCHANGE },
         duplicateShards: { ...SPIRIT_DUPLICATE_SHARDS },
         odds: { N: 50, R: 32, SR: 15, SSR: 3 },
@@ -3617,6 +3632,8 @@ export function createService({
           name: spirit.name,
           latin: spirit.latin,
           rarity: spirit.rarity,
+          role: spirit.role,
+          affinity: spirit.affinity,
           blurb: spirit.blurb,
           image: `/assets/spirits/${spirit.key}.png`,
         })),
@@ -3628,6 +3645,8 @@ export function createService({
             name: meta?.name ?? row.spirit_key,
             latin: meta?.latin ?? '',
             rarity: row.rarity,
+            role: meta?.role ?? '',
+            affinity: meta?.affinity ?? '',
             serial: row.serial === null ? null : Number(row.serial),
             blurb: meta?.blurb ?? '',
             image: `/assets/spirits/${row.spirit_key}.png`,
@@ -3713,6 +3732,8 @@ export function createService({
           name: meta?.name ?? outcome.spirit.spirit_key,
           latin: meta?.latin ?? '',
           rarity: outcome.spirit.rarity,
+          role: meta?.role ?? '',
+          affinity: meta?.affinity ?? '',
           serial: outcome.spirit.serial,
           blurb: meta?.blurb ?? '',
           image: `/assets/spirits/${outcome.spirit.spirit_key}.png`,

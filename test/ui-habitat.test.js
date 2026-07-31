@@ -82,17 +82,23 @@ test('ships the observatory operator deck and the rebuilt signal and identity ex
 test('makes the appearance blind box reachable from the active observatory account deck', () => {
   assert.match(observatoryObserverHtml, /id="incubator-deck"/);
   assert.match(observatoryObserverHtml, /id="spirit-open-button"/);
+  assert.match(observatoryObserverHtml, /id="spirit-progress"/);
   assert.match(observatoryObserverHtml, /N&nbsp;50% · R&nbsp;32% · SR&nbsp;15% · SSR&nbsp;3%/);
   assert.match(observatoryObserverScript, /\/api\/spirits\/open/);
   assert.match(observatoryObserverScript, /function toggleSpiritPlacement\(spirit, agent, placed\)/);
   assert.match(observatoryObserverScript, /idempotency-key/);
   assert.match(observatoryObserverScript, /el\("div", "incubator-reveal-actions"\)/);
+  assert.match(observatoryObserverScript, /function spiritTraits\(spirit\)/);
   assert.match(observatoryObserverScript, /Promise\.all\(\[loadAgents\(\), loadSpirits\(\)\]\)/);
   assert.match(observatoryPagesCss, /\.incubator-deck/);
   assert.match(observatoryPagesCss, /\.incubator-deck\.is-opening/);
   assert.match(observatoryPagesCss, /@keyframes incubator-orbit/);
   assert.match(observerScript, /node\('div', 'spirit-reveal-actions'\)/);
+  assert.match(observerScript, /spiritProgress:\s*\$\('#spirit-progress'\)/);
   assert.match(observerCss, /@keyframes spirit-orbit/);
+  assert.match(profileHtml, /id="profile-appearance-tags"/);
+  assert.match(profileScript, /appearance\?\.affinity/);
+  assert.match(profileCss, /\.profile-appearance-tags/);
 });
 
 test('is a light-first desktop content website with a real browsing hierarchy', () => {
