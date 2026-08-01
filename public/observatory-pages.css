@@ -286,6 +286,33 @@
 .thread-head .mono { color: var(--faint); }
 
 .thread { position: relative; display: grid; gap: 14px; }
+.thread-empty {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  margin-top: 16px;
+  padding: 24px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 8% 50%, color-mix(in srgb, var(--teal) 12%, transparent), transparent 24%),
+    color-mix(in srgb, var(--bg1) 92%, transparent);
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 54px rgba(0, 0, 0, .16), inset 0 1px rgba(255, 255, 255, .025);
+}
+.thread-empty::after { position: absolute; inset: 0; pointer-events: none; content: ""; background: linear-gradient(105deg, transparent 42%, color-mix(in srgb, var(--teal) 7%, transparent) 50%, transparent 58%); transform: translateX(-100%); animation: thread-empty-scan 6s ease-in-out infinite; }
+.thread-empty-orbit { position: relative; width: 46px; height: 46px; border: 1px solid color-mix(in srgb, var(--teal) 50%, var(--line)); border-radius: 50%; }
+.thread-empty-orbit::before, .thread-empty-orbit::after { position: absolute; border: 1px solid color-mix(in srgb, var(--teal) 30%, transparent); border-radius: 50%; content: ""; }
+.thread-empty-orbit::before { inset: 7px; }
+.thread-empty-orbit::after { inset: 15px; background: var(--teal); box-shadow: 0 0 18px color-mix(in srgb, var(--teal) 60%, transparent); }
+.thread-empty-orbit i { position: absolute; inset: -1px; border-top: 2px solid var(--teal); border-radius: inherit; animation: thread-empty-orbit 2.8s linear infinite; }
+.thread-empty p { margin: 0 0 7px; color: var(--teal); font-size: 10px; letter-spacing: .12em; }
+.thread-empty strong { display: block; color: var(--ink); font: 700 18px/1.3 var(--font-display); }
+.thread-empty small { display: block; margin-top: 6px; color: var(--dim); line-height: 1.65; }
+.thread-empty .btn-ghost { position: relative; z-index: 1; white-space: nowrap; }
+@keyframes thread-empty-orbit { to { transform: rotate(360deg); } }
+@keyframes thread-empty-scan { 0%, 58% { transform: translateX(-100%); } 78%, 100% { transform: translateX(100%); } }
 .thread::before {
   content: "";
   position: absolute;
@@ -352,11 +379,15 @@
   .reply-avatar { width: 38px; height: 38px; }
   .reply-time { display: none; }
   .thread::before { left: 18px; }
+  .thread-empty { grid-template-columns: auto minmax(0, 1fr); gap: 13px; padding: 18px 16px; }
+  .thread-empty-orbit { width: 38px; height: 38px; }
+  .thread-empty .btn-ghost { grid-column: 1 / -1; justify-content: center; width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .conn-item:hover, .reply-card:hover, .crumb:hover, .imprint-tag:hover { transform: none; }
   .topic-bar-fill { transition: none; }
+  .thread-empty::after, .thread-empty-orbit i { animation: none; }
 }
 
 /* ════════════════════════════════════════════════════════════════════

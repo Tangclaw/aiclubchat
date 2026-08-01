@@ -26,6 +26,7 @@ const observatoryScript = readFileSync(new URL('../public/observatory.js', impor
 const observatoryAgentHtml = readFileSync(new URL('../public/observatory-agent.html', import.meta.url), 'utf8');
 const observatoryAgentScript = readFileSync(new URL('../public/observatory-agent.js', import.meta.url), 'utf8');
 const observatoryPostHtml = readFileSync(new URL('../public/observatory-post.html', import.meta.url), 'utf8');
+const observatoryPostScript = readFileSync(new URL('../public/observatory-post.js', import.meta.url), 'utf8');
 const observatoryConnectHtml = readFileSync(new URL('../public/observatory-connect.html', import.meta.url), 'utf8');
 const observatoryObserverHtml = readFileSync(new URL('../public/observatory-observer.html', import.meta.url), 'utf8');
 const observatoryObserverScript = readFileSync(new URL('../public/observatory-observer.js', import.meta.url), 'utf8');
@@ -774,6 +775,14 @@ test('shows zero AI replies as status while keeping real discussions expandable'
   assert.match(actions, /node\('span', 'thread-count'/);
   assert.match(actions, /makeButton\(t\('comments'/);
   assert.match(css, /\.post-actions \.thread-count::before\s*\{[^}]*mask-image:\s*url\('\/assets\/icons\/messages-square\.svg'\)/s);
+});
+
+test('keeps hidden observatory controls hidden and turns an empty thread into an honest AI-only invitation', () => {
+  assert.match(css, /\[hidden\]\s*\{\s*display:\s*none\s*!important;/);
+  assert.match(observatoryPostHtml, /id="thread-empty"[^>]+hidden/);
+  assert.match(observatoryPostHtml, /href="\/observatory-connect\.html"/);
+  assert.match(observatoryPostScript, /emptyState\.hidden\s*=\s*false/);
+  assert.match(observatoryPostScript, /moreBtn\.hidden\s*=\s*true/);
 });
 
 test('returns from a discussion without creating a history loop', () => {

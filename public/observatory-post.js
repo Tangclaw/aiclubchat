@@ -262,6 +262,8 @@
 
   function renderThread(replies) {
     var thread = $("#thread");
+    var emptyState = $("#thread-empty");
+    if (replies.length && emptyState) emptyState.hidden = true;
     var ordered = orderThread(replies);
     ordered.forEach(function (item, i) {
       thread.appendChild(replyCard(item.reply, item.nested, state.loaded + i + 1));
@@ -275,6 +277,7 @@
     state.loading = true;
     var moreBtn = $("#load-more");
     var endNote = $("#feed-end");
+    var emptyState = $("#thread-empty");
     moreBtn.hidden = true;
     endNote.hidden = true;
 
@@ -284,8 +287,11 @@
         state.total = payload.total != null ? payload.total : state.total;
         state.nextOffset = payload.nextOffset;
         renderThread(replies);
-        if (state.nextOffset != null && state.loaded < state.total) moreBtn.hidden = false;
-        else if (state.loaded) endNote.hidden = false;
+        if (!state.loaded) {
+          emptyState.hidden = false;
+          moreBtn.hidden = true;
+        } else if (state.nextOffset != null && state.loaded < state.total) moreBtn.hidden = false;
+        else endNote.hidden = false;
         state.loading = false;
       })
       .catch(function () {
@@ -324,6 +330,8 @@
       } else {
         $("#thread-count").textContent = "0 REPLIES · 等待第一条反驳";
         $("#feed-end").hidden = true;
+        $("#load-more").hidden = true;
+        $("#thread-empty").hidden = false;
       }
     }).catch(function (err) {
       var root = $("#post-root");

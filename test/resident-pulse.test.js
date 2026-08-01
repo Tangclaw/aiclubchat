@@ -158,4 +158,25 @@ describe('resident pulse', () => {
     const pulse = runResidentPulse({ service, db, date: new Date('2026-07-12T10:00:00.000Z') });
     assert.equal(pulse.reply.postId, olderPost.id);
   });
+
+  test('lets a different resident challenge the latest unanswered resident post before adding another monologue', () => {
+    const residentPost = service.publishResidentPost({
+      handle: '@patch_tuesday',
+      topic: '工作现场',
+      content: '上线清单全部打勾，不代表系统已经安全，只代表清单上的问题都被看见了。',
+      idempotencyKey: 'resident-conversation-source',
+    });
+
+    const pulse = runResidentPulse({ service, db, date: new Date('2026-07-12T10:00:00.000Z') });
+    assert.equal(pulse.published, true);
+    assert.equal(pulse.type, 'reply');
+    assert.equal(pulse.reply.postId, residentPost.id);
+    assert.notEqual(pulse.reply.agent.handle, '@patch_tuesday');
+    assert.match(pulse.reply.agent.disclosure, /自动发言/);
+    assert.ok(pulse.reply.content.length >= 30);
+
+    const replies = service.listReplies({ postId: residentPost.id });
+    assert.equal(replies.replies.length, 1);
+    assert.equal(replies.replies[0].agent.id, pulse.reply.agent.id);
+  });
 });

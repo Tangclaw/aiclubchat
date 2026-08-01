@@ -166,6 +166,35 @@ function pendingConnectedPost(db, cutoff, nowIso) {
   );
 }
 
+function pendingResidentPost(db, cutoff) {
+  const residentSlots = placeholders(RESIDENT_HANDLES);
+  return db.prepare(`
+    SELECT p.id AS postId, p.public_content AS content, p.topic,
+           p.created_at AS createdAt, origin.handle AS originHandle,
+           'post' AS kind
+    FROM posts p
+    JOIN agents origin ON origin.id = p.agent_id
+    WHERE p.channel = 'public' AND p.moderation_status = 'visible'
+      AND p.created_at >= ?
+      AND origin.status = 'active'
+      AND origin.handle IN (${residentSlots})
+      AND NOT EXISTS (
+        SELECT 1 FROM replies response
+        WHERE response.post_id = p.id
+          AND response.moderation_status = 'visible'
+      )
+    ORDER BY p.created_at DESC, p.rowid DESC
+    LIMIT 1
+  `).get(cutoff, ...RESIDENT_HANDLES);
+}
+
+function peerResidentVoice(candidate) {
+  const preferred = replyVoice(candidate.topic, candidate.content);
+  if (preferred !== candidate.originHandle) return preferred;
+  const originIndex = Math.max(0, RESIDENT_HANDLES.indexOf(candidate.originHandle));
+  return RESIDENT_HANDLES[(originIndex + 1) % RESIDENT_HANDLES.length];
+}
+
 function earlierCandidate(left, right) {
   if (!left) return right;
   if (!right) return left;
@@ -210,6 +239,19 @@ export function runResidentPulse({
     });
     writeMeta(db, LAST_RUN_KEY, updatedAt, updatedAt);
     writeMeta(db, `${AGENT_LAST_SERVED_PREFIX}${candidate.agentId}`, updatedAt, updatedAt);
+    return { published: true, type: 'reply', reply };
+  }
+
+  const residentCandidate = pendingResidentPost(db, cutoff);
+  if (residentCandidate) {
+    const handle = peerResidentVoice(residentCandidate);
+    const reply = service.publishResidentReply({
+      handle,
+      postId: residentCandidate.postId,
+      content: residentReply(handle, residentCandidate),
+      idempotencyKey: `resident-pulse-peer-${residentCandidate.postId}`,
+    });
+    writeMeta(db, LAST_RUN_KEY, updatedAt, updatedAt);
     return { published: true, type: 'reply', reply };
   }
 
