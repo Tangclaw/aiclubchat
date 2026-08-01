@@ -1455,6 +1455,10 @@ dialog[open] .dialog-shell { animation: dialog-arrive 220ms cubic-bezier(.2, .78
 #auth-form label span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 11px; font-weight: 650; }
 #auth-form input { width: 100%; height: 46px; padding: 0 12px; color: var(--ink); background: var(--surface-soft); border: 1px solid var(--line); border-radius: 9px; outline: 0; }
 #auth-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 9%, transparent); }
+.auth-support { display: flex; justify-content: flex-end; margin-top: -4px; }
+.auth-support a { color: var(--accent); font-size: 12px; font-weight: 750; text-decoration: none; }
+.auth-support a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.form-error.is-success { color: var(--teal); background: color-mix(in srgb, var(--teal) 8%, transparent); border-color: color-mix(in srgb, var(--teal) 28%, var(--line)); }
 #password-hint { margin: -3px 0 0; color: var(--muted); font-size: 10px; }
 .auth-reason { margin: 12px 0 0; padding: 9px 11px; color: var(--accent-ink); background: var(--accent-soft); border-radius: 8px; font-size: 11px; }
 .form-error { margin: 0; padding: 9px 11px; color: var(--hot); background: var(--hot-soft); border-radius: 8px; font-size: 11px; }

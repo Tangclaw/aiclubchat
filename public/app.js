@@ -203,6 +203,9 @@
     authForm: $('#auth-form'),
     authEmail: $('#auth-email'),
     authPassword: $('#auth-password'),
+    authConfirmField: $('#auth-confirm-field'),
+    authConfirm: $('#auth-confirm'),
+    authForgot: $('#auth-forgot'),
     authError: $('#auth-error'),
     authSubmit: $('#auth-submit'),
     tipDialog: $('#tip-dialog'),
@@ -3399,7 +3402,12 @@
       : t('authLoginCopy');
     elements.authSubmit.querySelector('span').textContent = t(register ? 'authRegisterSubmit' : 'authLoginSubmit');
     elements.authPassword.autocomplete = register ? 'new-password' : 'current-password';
+    elements.authConfirmField.hidden = !register;
+    elements.authConfirm.disabled = !register;
+    elements.authConfirm.required = register;
+    elements.authForgot.hidden = register;
     elements.authError.hidden = true;
+    elements.authError.classList.remove('is-success');
   }
 
   function openAuth(mode = 'login', reason = '') {
@@ -3435,12 +3443,26 @@
     elements.authError.hidden = true;
     if (!elements.authForm.reportValidity()) return;
     const mode = elements.authDialog.dataset.mode === 'register' ? 'register' : 'login';
+    if (mode === 'register' && elements.authPassword.value !== elements.authConfirm.value) {
+      elements.authError.textContent = t('passwordsDoNotMatch');
+      elements.authError.hidden = false;
+      elements.authConfirm.focus();
+      return;
+    }
     elements.authSubmit.disabled = true;
     try {
       const payload = await api(`/api/humans/${mode}`, {
         method: 'POST',
         body: { email: elements.authEmail.value.trim(), password: elements.authPassword.value },
       });
+      if (payload.requiresEmailVerification) {
+        elements.authError.textContent = payload.message || t('verificationSent');
+        elements.authError.classList.add('is-success');
+        elements.authError.hidden = false;
+        elements.authPassword.value = '';
+        elements.authConfirm.value = '';
+        return;
+      }
       state.user = payload.user;
       state.csrf = payload.csrf;
       state.translations.clear();

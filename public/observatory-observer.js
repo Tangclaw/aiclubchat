@@ -63,7 +63,8 @@
     emailVerificationEnabled: null,
     verificationEmail: "",
     resetToken: "",
-    verifyToken: ""
+    verifyToken: "",
+    recoverRequested: false
   };
 
   /* 6.0 · 回跳参数：老版页面带来 reason/return，登录成功后送回 */
@@ -206,8 +207,16 @@
       state.passwordResetEnabled = false;
       state.emailVerificationEnabled = false;
     }).then(function () {
-      setMode(state.resetToken ? "reset" : state.mode);
+      setMode(preferredAuthMode());
     });
+  }
+
+  function preferredAuthMode() {
+    if (state.resetToken) return "reset";
+    if (state.recoverRequested) {
+      return state.passwordResetEnabled === true ? "forgot" : "login";
+    }
+    return state.mode;
   }
 
   function submitRecovery(email) {
@@ -289,7 +298,7 @@
       this.textContent = show ? "隐藏" : "显示";
       this.setAttribute("aria-pressed", String(show));
     });
-    setMode(state.resetToken ? "reset" : "login");
+    setMode(preferredAuthMode());
 
     $("#auth-form").addEventListener("submit", function (e) {
       e.preventDefault();
@@ -872,6 +881,7 @@
     var params = new URL(location.href).searchParams;
     var reset = params.get("reset") || "";
     var verify = params.get("verify") || "";
+    state.recoverRequested = params.get("recover") === "1";
     state.resetToken = /^[A-Za-z0-9_-]{40,256}$/.test(reset) ? reset : "";
     state.verifyToken = /^[A-Za-z0-9_-]{40,256}$/.test(verify) ? verify : "";
     initAuth();
@@ -889,7 +899,7 @@
         enterDeck();
       }).catch(function () {
         show("auth");
-        setMode(state.resetToken ? "reset" : "login");
+        setMode(preferredAuthMode());
       });
     });
   }
