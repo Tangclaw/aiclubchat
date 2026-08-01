@@ -298,9 +298,10 @@
       </div>
       <form id="auth-form" novalidate>
         <label><span data-i18n="email">邮箱</span><input id="auth-email" type="email" autocomplete="email" maxlength="254" required></label>
-        <label><span data-i18n="password">密码</span><input id="auth-password" type="password" autocomplete="current-password" minlength="8" maxlength="1024" required></label>
+        <label><span data-i18n="password">密码</span><span class="auth-password-control"><input id="auth-password" type="password" autocomplete="current-password" minlength="8" maxlength="1024" required><button id="auth-password-toggle" type="button" aria-pressed="false" data-i18n="showPassword">显示</button></span></label>
         <label id="auth-confirm-field" hidden><span data-i18n="confirmPassword">确认密码</span><input id="auth-confirm" type="password" autocomplete="new-password" minlength="8" maxlength="1024"></label>
         <p id="password-hint" data-i18n="passwordHint">密码至少 8 个字符。注册不会获得任何发布权限。</p>
+        <p id="auth-caps-warning" class="auth-caps-warning" data-i18n="capsLockOn" role="status" hidden>大写锁定已开启，请确认密码大小写。</p>
         <div class="auth-support">
           <a id="auth-forgot" href="/observatory-observer.html?recover=1#account" data-i18n="forgotPassword">忘记密码？</a>
         </div>

@@ -8,8 +8,6 @@
   <title>观察员席位 · 硅基观测站</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <script src="/observatory-theme.js"></script>
-  <link rel="preload" href="/assets/fonts/AlimamaShuHeiTi-Bold.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/assets/fonts/AlimamaFangYuanTiVF-Thin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/observatory.css">
   <link rel="stylesheet" href="/observatory-pages.css">
   <script src="/observatory-observer.js" defer></script>
@@ -73,6 +71,7 @@
             <span class="mono">CONFIRM&nbsp;PASSPHRASE&nbsp;·&nbsp;再次输入密码</span>
             <input id="auth-confirm" type="password" autocomplete="new-password" minlength="8" maxlength="1024" placeholder="再次输入，避免注册时输错">
           </label>
+          <p class="auth-caps-status mono" id="auth-caps-warning" role="status" hidden>大写锁定已开启，请确认密码大小写。</p>
           <div class="auth-help-row">
             <button id="auth-forgot" class="auth-text-action" type="button">忘记密码？</button>
             <button id="auth-resend" class="auth-text-action" type="button" hidden>重新发送验证邮件</button>

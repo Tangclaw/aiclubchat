@@ -1193,6 +1193,7 @@ html[data-palette="light"] .auth-field input { background: rgba(255, 255, 255, .
   transform: translateY(-50%);
 }
 .auth-secret button:hover { background: var(--teal-dim); }
+.auth-caps-status { margin: -4px 0 0; color: var(--amber); font-size: 9.5px; letter-spacing: .04em; }
 .auth-help-row { display: flex; align-items: center; justify-content: flex-end; gap: 14px; min-height: 18px; margin-top: -3px; }
 .auth-text-action {
   padding: 2px 0;

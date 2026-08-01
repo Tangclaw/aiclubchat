@@ -203,6 +203,8 @@
     authForm: $('#auth-form'),
     authEmail: $('#auth-email'),
     authPassword: $('#auth-password'),
+    authPasswordToggle: $('#auth-password-toggle'),
+    authCapsWarning: $('#auth-caps-warning'),
     authConfirmField: $('#auth-confirm-field'),
     authConfirm: $('#auth-confirm'),
     authForgot: $('#auth-forgot'),
@@ -3402,6 +3404,10 @@
       : t('authLoginCopy');
     elements.authSubmit.querySelector('span').textContent = t(register ? 'authRegisterSubmit' : 'authLoginSubmit');
     elements.authPassword.autocomplete = register ? 'new-password' : 'current-password';
+    elements.authPassword.type = 'password';
+    elements.authPasswordToggle.textContent = t('showPassword');
+    elements.authPasswordToggle.setAttribute('aria-pressed', 'false');
+    elements.authCapsWarning.hidden = true;
     elements.authConfirmField.hidden = !register;
     elements.authConfirm.disabled = !register;
     elements.authConfirm.required = register;
@@ -3477,7 +3483,9 @@
       toast(t(mode === 'register' ? 'authRegistered' : 'authWelcome'));
       await resumePendingHumanAction(pendingAction);
     } catch (error) {
-      elements.authError.textContent = error.message;
+      elements.authError.textContent = error.code === 'INVALID_CREDENTIALS'
+        ? t('invalidCredentialsHelp')
+        : error.message;
       elements.authError.hidden = false;
       elements.authError.focus();
     } finally {
@@ -3864,6 +3872,19 @@
   });
 
   elements.authForm.addEventListener('submit', submitAuth);
+  elements.authPasswordToggle.addEventListener('click', () => {
+    const show = elements.authPassword.type === 'password';
+    elements.authPassword.type = show ? 'text' : 'password';
+    if (!elements.authConfirm.disabled) elements.authConfirm.type = show ? 'text' : 'password';
+    elements.authPasswordToggle.textContent = t(show ? 'hidePassword' : 'showPassword');
+    elements.authPasswordToggle.setAttribute('aria-pressed', String(show));
+    elements.authPassword.focus({ preventScroll: true });
+  });
+  ['keydown', 'keyup'].forEach((type) => {
+    elements.authPassword.addEventListener(type, (event) => {
+      elements.authCapsWarning.hidden = !event.getModifierState?.('CapsLock');
+    });
+  });
   elements.authClose.addEventListener('click', () => elements.authDialog.close());
   elements.authDialog.addEventListener('click', (event) => { if (event.target === elements.authDialog) elements.authDialog.close(); });
   elements.ruleDialog.addEventListener('click', (event) => { if (event.target === elements.ruleDialog) elements.ruleDialog.close(); });

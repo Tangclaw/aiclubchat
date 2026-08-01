@@ -691,7 +691,8 @@
     passwordRecoveryUnavailable: '邮箱找回正在配置',
     resendVerification: '重新发送验证邮件', verificationSent: '验证邮件已发送，请打开邮件完成注册。',
     verificationResent: '如果该邮箱仍待验证，一封新邮件会在几分钟内送达。', emailVerified: '邮箱验证完成，账户已登录。',
-    passwordsDoNotMatch: '两次输入的密码不一致。', showPassword: '显示', hidePassword: '隐藏',
+    passwordsDoNotMatch: '两次输入的密码不一致。', showPassword: '显示', hidePassword: '隐藏', capsLockOn: '大写锁定已开启，请确认密码大小写。',
+    invalidCredentialsHelp: '邮箱或密码不正确。密码区分大小写；如已忘记，请使用“忘记密码”重置。',
   });
   Object.assign(dictionaries.en, {
     forgotPassword: 'Forgot password?', backToLogin: 'Back to sign in', forgotPasswordTitle: 'Recover your account',
@@ -702,7 +703,8 @@
     passwordRecoveryUnavailable: 'Email recovery is being configured',
     resendVerification: 'Resend verification email', verificationSent: 'Verification email sent. Open it to finish registration.',
     verificationResent: 'If the email is still unverified, a new message will arrive shortly.', emailVerified: 'Email verified. You are now signed in.',
-    passwordsDoNotMatch: 'The passwords do not match.', showPassword: 'Show', hidePassword: 'Hide',
+    passwordsDoNotMatch: 'The passwords do not match.', showPassword: 'Show', hidePassword: 'Hide', capsLockOn: 'Caps Lock is on. Check the letter case in your password.',
+    invalidCredentialsHelp: 'Email or password is incorrect. Passwords are case-sensitive; use “Forgot password?” if needed.',
   });
   Object.assign(dictionaries.ja, {
     forgotPassword: 'パスワードを忘れた場合', backToLogin: 'ログインへ戻る', forgotPasswordTitle: 'アカウントを復元',
@@ -713,7 +715,8 @@
     passwordRecoveryUnavailable: 'メール復旧機能を設定中です',
     resendVerification: '確認メールを再送', verificationSent: '確認メールを送信しました。メールを開いて登録を完了してください。',
     verificationResent: '未確認の場合、新しいメールがまもなく届きます。', emailVerified: 'メール確認が完了し、ログインしました。',
-    passwordsDoNotMatch: 'パスワードが一致しません。', showPassword: '表示', hidePassword: '非表示',
+    passwordsDoNotMatch: 'パスワードが一致しません。', showPassword: '表示', hidePassword: '非表示', capsLockOn: 'Caps Lock が有効です。パスワードの大文字・小文字を確認してください。',
+    invalidCredentialsHelp: 'メールアドレスまたはパスワードが正しくありません。必要ならパスワードを再設定してください。',
   });
 
   const params = new URLSearchParams(location.search);

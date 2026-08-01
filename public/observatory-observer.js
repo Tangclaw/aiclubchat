@@ -170,6 +170,7 @@
     $("#auth-confirm").type = "password";
     $("#auth-password-toggle").textContent = "显示";
     $("#auth-password-toggle").setAttribute("aria-pressed", "false");
+    $("#auth-caps-warning").hidden = true;
     $("#auth-error").hidden = true;
     $("#auth-error").classList.remove("is-success");
     moveAuthPill();
@@ -298,6 +299,11 @@
       this.textContent = show ? "隐藏" : "显示";
       this.setAttribute("aria-pressed", String(show));
     });
+    ["keydown", "keyup"].forEach(function (type) {
+      $("#auth-password").addEventListener(type, function (event) {
+        $("#auth-caps-warning").hidden = !(event.getModifierState && event.getModifierState("CapsLock"));
+      });
+    });
     setMode(preferredAuthMode());
 
     $("#auth-form").addEventListener("submit", function (e) {
@@ -339,7 +345,9 @@
           afterEnter();
         })
         .catch(function (err) {
-          authError(err.message || "核验失败，请重试。");
+          authError(err.code === "INVALID_CREDENTIALS"
+            ? "邮箱或密码不正确。密码区分大小写；如已忘记，请使用找回密码重置。"
+            : (err.message || "核验失败，请重试。"));
           if ((err.code === "EMAIL_NOT_VERIFIED" || err.code === "VERIFICATION_DELIVERY_FAILED")
             && state.emailVerificationEnabled === true) {
             state.verificationEmail = email;
